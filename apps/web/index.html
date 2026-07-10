@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NestFlow AI — Nesting Playground</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%232563eb'/></svg>" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="logo">◧</span>
+          <div>
+            <h1>NestFlow&nbsp;AI</h1>
+            <p class="tag">Nesting engine playground — runs in your browser</p>
+          </div>
+        </div>
+        <a class="ghost" href="https://github.com" target="_blank" rel="noreferrer">@nestflow/engine</a>
+      </header>
+
+      <main class="layout">
+        <aside class="panel">
+          <section class="group">
+            <h2>Your parts</h2>
+            <div id="drop" class="drop">
+              <input id="file" type="file" accept=".svg,.dxf,image/svg+xml" hidden />
+              <span class="drop-ic">⬆</span>
+              <span>Drop an <b>SVG</b> or <b>DXF</b> here, or <button type="button" id="browse" class="link">browse</button></span>
+            </div>
+            <div class="row">
+              <label class="field"><span>Scale (mm / unit)</span><input id="scale" type="number" value="1" min="0.01" step="0.1" /></label>
+            </div>
+
+            <div class="textgen">
+              <label class="field"><span>…or type letters to cut</span><input id="text" type="text" value="ASSALOMU ALEYKUM" /></label>
+              <div class="row">
+                <label class="field"><span>Letter height (mm)</span><input id="letterH" type="number" value="80" min="5" step="5" /></label>
+                <button id="makeText" class="secondary">Make letters</button>
+              </div>
+            </div>
+            <p id="importInfo" class="hint">Using a built-in sample set.</p>
+          </section>
+
+          <section class="group">
+            <h2>Sample set</h2>
+            <label class="field">
+              <span>Or pick a demo</span>
+              <select id="sampleSet">
+                <option value="signshop">Sign shop (rings, triangles, brackets)</option>
+                <option value="letters">Letters &amp; rings (hole filling)</option>
+                <option value="rects">Rectangles &amp; bars</option>
+                <option value="dense">Dense mixed (stress test)</option>
+              </select>
+            </label>
+          </section>
+
+          <section class="group">
+            <h2>Sheet (mm)</h2>
+            <div class="row">
+              <label class="field"><span>Width</span><input id="sheetW" type="number" value="800" min="50" step="10" /></label>
+              <label class="field"><span>Height</span><input id="sheetH" type="number" value="600" min="50" step="10" /></label>
+            </div>
+            <div class="row">
+              <label class="field"><span>Margin</span><input id="margin" type="number" value="5" min="0" step="1" /></label>
+              <label class="field"><span>Sheet $</span><input id="sheetCost" type="number" value="45" min="0" step="1" /></label>
+            </div>
+          </section>
+
+          <section class="group">
+            <h2>Cutting</h2>
+            <div class="row">
+              <label class="field"><span>Spacing</span><input id="spacing" type="number" value="3" min="0" step="0.5" /></label>
+              <label class="field"><span>Kerf</span><input id="kerf" type="number" value="0.2" min="0" step="0.1" /></label>
+            </div>
+            <label class="check"><input id="holeFilling" type="checkbox" checked /> <span>Fill holes with small parts</span></label>
+          </section>
+
+          <section class="group">
+            <h2>Rotations</h2>
+            <div class="chips">
+              <label class="chip"><input type="checkbox" class="rot" value="0" checked />0°</label>
+              <label class="chip"><input type="checkbox" class="rot" value="90" checked />90°</label>
+              <label class="chip"><input type="checkbox" class="rot" value="180" checked />180°</label>
+              <label class="chip"><input type="checkbox" class="rot" value="270" checked />270°</label>
+            </div>
+          </section>
+
+          <section class="group">
+            <h2>Optimization</h2>
+            <div class="segmented" id="strategy">
+              <button data-val="fast" class="active">Fast</button>
+              <button data-val="balanced">Balanced</button>
+              <button data-val="max">Max saving</button>
+            </div>
+            <label class="check" style="margin-top:12px">
+              <input id="showPath" type="checkbox" />
+              <span>Show cut path &amp; <span style="color:#f97316">common lines</span></span>
+            </label>
+          </section>
+
+          <button id="run" class="primary">Nest layout</button>
+          <p id="status" class="status">Ready.</p>
+
+          <section class="group">
+            <h2>Export</h2>
+            <div class="exports">
+              <button id="exportSvg" class="secondary" disabled>Download SVG</button>
+              <button id="exportDxf" class="secondary" disabled>Download DXF</button>
+            </div>
+          </section>
+        </aside>
+
+        <section class="stage">
+          <div class="metrics" id="metrics"></div>
+          <div class="viewport" id="viewport">
+            <div class="placeholder">Press <b>Nest layout</b> to run the engine.</div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

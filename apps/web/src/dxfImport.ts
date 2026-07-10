@@ -1,0 +1,344 @@
+import type { Point, Ring } from '@nestflow/engine';
+import { contoursToParts, ringsToContours, type ImportResult } from './importCommon';
+
+/**
+ * DXF importer (browser, pure text — no DOM needed).
+ *
+ * DXF geometry in the ENTITIES section is often an unordered soup of LINE / ARC /
+ * LWPOLYLINE / CIRCLE entities. The importer:
+ *   1. tokenises the (group-code, value) stream,
+ *   2. converts each entity to polyline points — flattening arcs, circles,
+ *      ellipses and LWPOLYLINE bulges,
+ *   3. keeps already-closed loops as rings, and
+ *   4. chains the remaining open segments end-to-end into closed loops,
+ * then groups the loops into parts (outer + holes) like the SVG importer.
+ */
+
+interface Pair {
+  code: number;
+  value: string;
+}
+
+interface EntityGroup {
+  type: string;
+  pairs: Pair[];
+}
+
+const ARC_TOLERANCE = 0.15; // max chord deviation when flattening arcs (DXF units)
+
+function tokenize(text: string): Pair[] {
+  const lines = text.split(/\r\n|\r|\n/);
+  const pairs: Pair[] = [];
+  for (let i = 0; i + 1 < lines.length; i += 2) {
+    const code = Number.parseInt((lines[i] ?? '').trim(), 10);
+    if (Number.isNaN(code)) continue;
+    pairs.push({ code, value: (lines[i + 1] ?? '').trim() });
+  }
+  return pairs;
+}
+
+/** Extracts entity groups from the ENTITIES section (splitting on group code 0). */
+function entityGroups(pairs: Pair[]): EntityGroup[] {
+  // Find the ENTITIES section.
+  let start = -1;
+  for (let i = 0; i < pairs.length - 1; i++) {
+    if (pairs[i]!.code === 0 && pairs[i]!.value === 'SECTION' && pairs[i + 1]!.code === 2 && pairs[i + 1]!.value === 'ENTITIES') {
+      start = i + 2;
+      break;
+    }
+  }
+  if (start === -1) return [];
+
+  const groups: EntityGroup[] = [];
+  let cur: EntityGroup | null = null;
+  for (let i = start; i < pairs.length; i++) {
+    const p = pairs[i]!;
+    if (p.code === 0) {
+      if (p.value === 'ENDSEC') break;
+      if (cur) groups.push(cur);
+      cur = { type: p.value, pairs: [] };
+    } else if (cur) {
+      cur.pairs.push(p);
+    }
+  }
+  if (cur) groups.push(cur);
+  return groups;
+}
+
+function first(pairs: Pair[], code: number): number | undefined {
+  for (const p of pairs) if (p.code === code) return Number.parseFloat(p.value);
+  return undefined;
+}
+
+function arcPoints(cx: number, cy: number, r: number, startDeg: number, endDeg: number): Point[] {
+  let sweep = endDeg - startDeg;
+  while (sweep <= 0) sweep += 360; // DXF arcs go CCW
+  const sweepRad = (sweep * Math.PI) / 180;
+  const step = 2 * Math.acos(Math.max(0, 1 - ARC_TOLERANCE / Math.max(r, 1e-6)));
+  const n = Math.max(2, Math.ceil(sweepRad / Math.max(step, 1e-3)));
+  const a0 = (startDeg * Math.PI) / 180;
+  const pts: Point[] = [];
+  for (let i = 0; i <= n; i++) {
+    const a = a0 + sweepRad * (i / n);
+    pts.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+  }
+  return pts;
+}
+
+/** Flattens an LWPOLYLINE bulge arc between p1 and p2 into intermediate points. */
+function bulgePoints(p1: Point, p2: Point, bulge: number): Point[] {
+  const theta = 4 * Math.atan(bulge); // signed included angle
+  if (Math.abs(theta) < 1e-9) return [];
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 1e-9) return [];
+  const r = dist / (2 * Math.sin(theta / 2)); // signed radius
+  const nx = -dy / dist;
+  const ny = dx / dist;
+  const d = r * Math.cos(theta / 2);
+  const cx = (p1.x + p2.x) / 2 + nx * d;
+  const cy = (p1.y + p2.y) / 2 + ny * d;
+  const startAng = Math.atan2(p1.y - cy, p1.x - cx);
+  const rad = Math.abs(r);
+  const step = 2 * Math.acos(Math.max(0, 1 - ARC_TOLERANCE / Math.max(rad, 1e-6)));
+  const n = Math.max(2, Math.ceil(Math.abs(theta) / Math.max(step, 1e-3)));
+  const pts: Point[] = [];
+  for (let i = 1; i < n; i++) {
+    const a = startAng + theta * (i / n);
+    pts.push({ x: cx + rad * Math.cos(a), y: cy + rad * Math.sin(a) });
+  }
+  return pts;
+}
+
+interface Vertex {
+  x: number;
+  y: number;
+  bulge: number;
+}
+
+function polylineFromVertices(verts: Vertex[], closed: boolean): Point[] {
+  const pts: Point[] = [];
+  const n = verts.length;
+  if (n === 0) return pts;
+  for (let i = 0; i < n; i++) {
+    const v = verts[i]!;
+    pts.push({ x: v.x, y: v.y });
+    const isLast = i === n - 1;
+    if (isLast && !closed) break;
+    const next = verts[(i + 1) % n]!;
+    if (Math.abs(v.bulge) > 1e-12) {
+      pts.push(...bulgePoints({ x: v.x, y: v.y }, { x: next.x, y: next.y }, v.bulge));
+    }
+  }
+  return pts;
+}
+
+function lwpolyline(pairs: Pair[]): { pts: Point[]; closed: boolean } {
+  const verts: Vertex[] = [];
+  let closed = false;
+  let cur: Vertex | null = null;
+  for (const p of pairs) {
+    if (p.code === 70) closed = (Number.parseInt(p.value, 10) & 1) === 1;
+    else if (p.code === 10) {
+      if (cur) verts.push(cur);
+      cur = { x: Number.parseFloat(p.value), y: 0, bulge: 0 };
+    } else if (p.code === 20 && cur) cur.y = Number.parseFloat(p.value);
+    else if (p.code === 42 && cur) cur.bulge = Number.parseFloat(p.value);
+  }
+  if (cur) verts.push(cur);
+  return { pts: polylineFromVertices(verts, closed), closed };
+}
+
+/** Chains open segments into closed loops by matching endpoints within tolerance. */
+function chainLoops(segments: Point[][], tol: number): { rings: Ring[]; openCount: number } {
+  const near = (a: Point, b: Point): boolean => Math.hypot(a.x - b.x, a.y - b.y) <= tol;
+  const open = segments.filter((s) => s.length >= 2).map((s) => s.slice());
+  const rings: Ring[] = [];
+  let openCount = 0;
+
+  while (open.length) {
+    const chain = open.pop()!;
+    let extended = true;
+    while (extended) {
+      extended = false;
+      const start = chain[0]!;
+      const end = chain[chain.length - 1]!;
+      if (chain.length >= 3 && near(start, end)) break;
+      for (let i = 0; i < open.length; i++) {
+        const seg = open[i]!;
+        const s0 = seg[0]!;
+        const s1 = seg[seg.length - 1]!;
+        if (near(end, s0)) chain.push(...seg.slice(1));
+        else if (near(end, s1)) chain.push(...seg.slice(0, -1).reverse());
+        else if (near(start, s1)) chain.unshift(...seg.slice(0, -1));
+        else if (near(start, s0)) chain.unshift(...seg.slice(1).reverse());
+        else continue;
+        open.splice(i, 1);
+        extended = true;
+        break;
+      }
+    }
+    if (chain.length >= 3 && near(chain[0]!, chain[chain.length - 1]!)) {
+      chain.pop(); // drop duplicate closing vertex
+      if (chain.length >= 3) rings.push(chain);
+    } else {
+      openCount++;
+    }
+  }
+  return { rings, openCount };
+}
+
+export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
+  const groups = entityGroups(tokenize(text));
+  if (groups.length === 0) return { parts: [], warnings: ['No DXF ENTITIES section found.'] };
+
+  const closedRings: Ring[] = [];
+  const openSegments: Point[][] = [];
+  const warnings: string[] = [];
+  let inserts = 0;
+  let splines = 0;
+
+  for (let gi = 0; gi < groups.length; gi++) {
+    const g = groups[gi]!;
+    switch (g.type) {
+      case 'LINE': {
+        const x1 = first(g.pairs, 10);
+        const y1 = first(g.pairs, 20);
+        const x2 = first(g.pairs, 11);
+        const y2 = first(g.pairs, 21);
+        if ([x1, y1, x2, y2].every((v) => v !== undefined)) {
+          openSegments.push([
+            { x: x1!, y: y1! },
+            { x: x2!, y: y2! },
+          ]);
+        }
+        break;
+      }
+      case 'LWPOLYLINE': {
+        const { pts, closed } = lwpolyline(g.pairs);
+        if (pts.length >= 2) (closed ? closedRings : openSegments).push(pts as Ring);
+        break;
+      }
+      case 'POLYLINE': {
+        // Vertices follow as their own VERTEX groups until SEQEND.
+        const closed = ((first(g.pairs, 70) ?? 0) as number) & 1 ? true : false;
+        const verts: Vertex[] = [];
+        while (gi + 1 < groups.length && groups[gi + 1]!.type === 'VERTEX') {
+          gi++;
+          const vp = groups[gi]!.pairs;
+          verts.push({ x: first(vp, 10) ?? 0, y: first(vp, 20) ?? 0, bulge: first(vp, 42) ?? 0 });
+        }
+        if (gi + 1 < groups.length && groups[gi + 1]!.type === 'SEQEND') gi++;
+        const pts = polylineFromVertices(verts, closed);
+        if (pts.length >= 2) (closed ? closedRings : openSegments).push(pts as Ring);
+        break;
+      }
+      case 'CIRCLE': {
+        const cx = first(g.pairs, 10);
+        const cy = first(g.pairs, 20);
+        const r = first(g.pairs, 40);
+        if (cx !== undefined && cy !== undefined && r !== undefined && r > 0) {
+          closedRings.push(arcPoints(cx, cy, r, 0, 360).slice(0, -1));
+        }
+        break;
+      }
+      case 'ARC': {
+        const cx = first(g.pairs, 10);
+        const cy = first(g.pairs, 20);
+        const r = first(g.pairs, 40);
+        const a0 = first(g.pairs, 50);
+        const a1 = first(g.pairs, 51);
+        if ([cx, cy, r, a0, a1].every((v) => v !== undefined) && r! > 0) {
+          openSegments.push(arcPoints(cx!, cy!, r!, a0!, a1!));
+        }
+        break;
+      }
+      case 'ELLIPSE': {
+        const cx = first(g.pairs, 10);
+        const cy = first(g.pairs, 20);
+        const mx = first(g.pairs, 11) ?? 0;
+        const my = first(g.pairs, 21) ?? 0;
+        const ratio = first(g.pairs, 40) ?? 1;
+        const t0 = first(g.pairs, 41) ?? 0;
+        const t1 = first(g.pairs, 42) ?? Math.PI * 2;
+        if (cx !== undefined && cy !== undefined) {
+          const major = Math.hypot(mx, my);
+          const rot = Math.atan2(my, mx);
+          const minor = major * ratio;
+          let sweep = t1 - t0;
+          if (sweep <= 0) sweep += Math.PI * 2;
+          const n = Math.max(16, Math.ceil((sweep / (Math.PI * 2)) * 64));
+          const pts: Point[] = [];
+          for (let i = 0; i <= n; i++) {
+            const t = t0 + sweep * (i / n);
+            const ex = major * Math.cos(t);
+            const ey = minor * Math.sin(t);
+            pts.push({ x: cx + ex * Math.cos(rot) - ey * Math.sin(rot), y: cy + ex * Math.sin(rot) + ey * Math.cos(rot) });
+          }
+          const full = Math.abs(sweep - Math.PI * 2) < 1e-6;
+          if (full) closedRings.push(pts.slice(0, -1));
+          else openSegments.push(pts);
+        }
+        break;
+      }
+      case 'SPLINE': {
+        // Approximate by its fit points (code 11/21), else control points (10/20).
+        const fit: Point[] = [];
+        for (let i = 0; i < g.pairs.length; i++) {
+          if (g.pairs[i]!.code === 11) {
+            fit.push({ x: Number.parseFloat(g.pairs[i]!.value), y: first(g.pairs.slice(i), 21) ?? 0 });
+          }
+        }
+        let pts = fit;
+        if (pts.length < 2) {
+          const ctrl: Point[] = [];
+          const xs = g.pairs.filter((p) => p.code === 10).map((p) => Number.parseFloat(p.value));
+          const ys = g.pairs.filter((p) => p.code === 20).map((p) => Number.parseFloat(p.value));
+          for (let i = 0; i < Math.min(xs.length, ys.length); i++) ctrl.push({ x: xs[i]!, y: ys[i]! });
+          pts = ctrl;
+        }
+        if (pts.length >= 2) {
+          openSegments.push(pts);
+          splines++;
+        }
+        break;
+      }
+      case 'INSERT':
+        inserts++;
+        break;
+      default:
+        break;
+    }
+  }
+
+  // Tolerance for chaining, scaled to the drawing size.
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const seg of openSegments) {
+    for (const p of seg) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+  const diag = Number.isFinite(minX) ? Math.hypot(maxX - minX, maxY - minY) : 0;
+  const tol = Math.max(1e-4, diag * 2e-4);
+
+  const chained = chainLoops(openSegments, tol);
+  const rings = [...closedRings, ...chained.rings];
+
+  if (inserts > 0) warnings.push(`${inserts} block insert(s) skipped (not expanded).`);
+  if (splines > 0) warnings.push(`${splines} spline(s) approximated.`);
+  if (chained.openCount > 0) warnings.push(`${chained.openCount} open chain(s) could not be closed.`);
+
+  const result = contoursToParts(ringsToContours(rings), mmPerUnit);
+  result.warnings.unshift(...warnings);
+  if (result.parts.length === 0 && warnings.length === 0) {
+    result.warnings.push('No closed loops found in the DXF.');
+  }
+  return result;
+}

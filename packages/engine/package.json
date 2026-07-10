@@ -1,0 +1,39 @@
+{
+  "name": "@nestflow/engine",
+  "version": "0.1.0",
+  "description": "Industrial irregular-shape nesting engine: NFP/Minkowski geometry, GA + simulated annealing search, hole filling, multi-sheet packing, and costing metrics.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "demo": "tsx examples/demo.ts",
+    "bench": "tsx bench/benchmark.ts"
+  },
+  "dependencies": {
+    "clipper-lib": "^6.4.2",
+    "earcut": "^3.0.1",
+    "polygon-clipping": "^0.15.7"
+  },
+  "devDependencies": {
+    "@types/earcut": "^3.0.0",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}
