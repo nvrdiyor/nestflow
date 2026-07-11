@@ -29,10 +29,10 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
   const primaryCta = loggedIn
     ? `<button class="btn btn-primary btn-lg js-app">${t('landing.openAppArrow')}</button>`
     : `<button class="btn btn-primary btn-lg js-start">${t('landing.getStarted')}</button>`;
-  const feat = (i: number, ic: string) =>
-    `<div class="feature"><div class="ic">${ic}</div><h3>${t(`landing.f${i}t`)}</h3><p>${t(`landing.f${i}d`)}</p></div>`;
-  const step = (i: number) =>
-    `<div class="step"><div class="num">${i}</div><h4>${t(`landing.s${i}t`)}</h4><p>${t(`landing.s${i}d`)}</p></div>`;
+  const feat = (i: number, ic: string, delay: number) =>
+    `<div class="feature" data-aos="fade-up" data-aos-delay="${delay}"><div class="ic"><i data-lucide="${ic}"></i></div><h3>${t(`landing.f${i}t`)}</h3><p>${t(`landing.f${i}d`)}</p></div>`;
+  const step = (i: number, delay: number) =>
+    `<div class="step" data-aos="fade-up" data-aos-delay="${delay}"><div class="num">${i}</div><h4>${t(`landing.s${i}t`)}</h4><p>${t(`landing.s${i}d`)}</p></div>`;
 
   root.innerHTML = `
   <header class="container landing-nav">
@@ -55,28 +55,28 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
 
   <section class="section" id="features">
     <div class="container">
-      <div class="section-head">
+      <div class="section-head" data-aos="fade-up">
         <span class="eyebrow">${t('landing.featuresEyebrow')}</span>
         <h2>${t('landing.featuresTitle')}</h2>
         <p>${t('landing.featuresSub')}</p>
       </div>
       <div class="grid-3">
-        ${feat(1, '🔤')}${feat(2, '📥')}${feat(3, '🧩')}${feat(4, '✂️')}${feat(5, '📐')}${feat(6, '📤')}
+        ${feat(1, 'type', 0)}${feat(2, 'upload', 60)}${feat(3, 'puzzle', 120)}${feat(4, 'scissors', 0)}${feat(5, 'layout-grid', 60)}${feat(6, 'download', 120)}
       </div>
     </div>
   </section>
 
   <section class="section" id="how" style="background:var(--bg-2);border-block:1px solid var(--line)">
     <div class="container">
-      <div class="section-head"><span class="eyebrow">${t('landing.howEyebrow')}</span><h2>${t('landing.howTitle')}</h2></div>
-      <div class="steps">${step(1)}${step(2)}${step(3)}${step(4)}</div>
+      <div class="section-head" data-aos="fade-up"><span class="eyebrow">${t('landing.howEyebrow')}</span><h2>${t('landing.howTitle')}</h2></div>
+      <div class="steps">${step(1, 0)}${step(2, 70)}${step(3, 140)}${step(4, 210)}</div>
     </div>
   </section>
 
   <section class="section" id="credits">
     <div class="container">
-      <div class="section-head"><span class="eyebrow">${t('landing.creditsEyebrow')}</span><h2>${t('landing.creditsTitle')}</h2><p>${t('landing.creditsSub', { n: STARTING_CREDITS })}</p></div>
-      <div class="credits-box">
+      <div class="section-head" data-aos="fade-up"><span class="eyebrow">${t('landing.creditsEyebrow')}</span><h2>${t('landing.creditsTitle')}</h2><p>${t('landing.creditsSub', { n: STARTING_CREDITS })}</p></div>
+      <div class="credits-box" data-aos="fade-up" data-aos-delay="60">
         <div class="credits-formula">cost = strategyBase + ⌈ parts ÷ 15 ⌉&nbsp;&nbsp;&nbsp;(Fast = 1, Balanced = 3, Max = 6)</div>
         <div class="credit-examples">
           <div class="credit-ex"><div class="n">2<small> cr</small></div><div class="d">${t('landing.creditsEx1')}</div></div>
