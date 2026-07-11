@@ -1,29 +1,11 @@
 import { ringBounds, type Part, type Ring } from '@nestflow/engine';
+import { colorFor } from './colors';
 
 /**
  * A lightweight, instant preview of the loaded parts — arranged in simple
  * wrapping rows (not nested) — so the user immediately SEES what was uploaded or
  * generated before spending credits on a real nest.
  */
-
-const PALETTE = [
-  '#2563eb',
-  '#16a34a',
-  '#db2777',
-  '#f59e0b',
-  '#8b5cf6',
-  '#0891b2',
-  '#dc2626',
-  '#65a30d',
-  '#c026d3',
-  '#0d9488',
-];
-
-function colorFor(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
-  return PALETTE[hash % PALETTE.length] as string;
-}
 
 function ringPath(ring: Ring, dx: number, dy: number): string {
   let d = '';

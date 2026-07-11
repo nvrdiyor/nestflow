@@ -180,6 +180,70 @@ table.data tr:hover td { background: rgba(255,255,255,.02); }
 .lang-switch button.active { background: var(--accent-2); color: #fff; }
 .lang-switch button:hover:not(.active) { color: var(--text); }
 
+/* ---------- motion ---------- */
+@keyframes nf-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes nf-fade-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes nf-pop { 0% { transform: scale(.96); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes nf-glow { from { opacity: .55; transform: translateY(-6px); } to { opacity: 1; transform: translateY(6px); } }
+@keyframes nf-float { from { transform: translateY(0); } to { transform: translateY(-8px); } }
+
+/* view entrance */
+.hero, .section, .auth-wrap, .page, .tool-view { animation: nf-fade .28s ease both; }
+.hero .eyebrow { animation: nf-fade-up .5s .02s ease both; }
+.hero h1 { animation: nf-fade-up .6s .06s ease both; }
+.hero .lead { animation: nf-fade-up .6s .14s ease both; }
+.hero-cta { animation: nf-fade-up .6s .22s ease both; }
+.hero-figure { animation: nf-fade-up .7s .3s ease both; }
+.hero::before { animation: nf-glow 7s ease-in-out infinite alternate; }
+.hero-figure svg { animation: nf-float 6s ease-in-out infinite alternate; }
+
+.section-head { animation: nf-fade-up .5s ease both; }
+.feature, .step, .credit-ex { animation: nf-fade-up .5s ease both; }
+.feature:nth-child(2) { animation-delay: .05s; }
+.feature:nth-child(3) { animation-delay: .1s; }
+.feature:nth-child(4) { animation-delay: .15s; }
+.feature:nth-child(5) { animation-delay: .2s; }
+.feature:nth-child(6) { animation-delay: .25s; }
+.step:nth-child(2) { animation-delay: .06s; }
+.step:nth-child(3) { animation-delay: .12s; }
+.step:nth-child(4) { animation-delay: .18s; }
+.credits-box { animation: nf-fade-up .55s .05s ease both; }
+.auth-card { animation: nf-pop .3s ease both; }
+.stat { animation: nf-fade-up .45s ease both; }
+.stat:nth-child(2) { animation-delay: .05s; }
+.stat:nth-child(3) { animation-delay: .1s; }
+.stat:nth-child(4) { animation-delay: .15s; }
+.viewport svg { animation: nf-fade .3s ease both; }
+
+/* micro-interactions */
+.btn { transition: background .15s, border-color .15s, color .15s, transform .12s ease; }
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: translateY(0) scale(.98); }
+.btn-primary { box-shadow: 0 6px 20px -8px rgba(37,99,235,.6); }
+.btn-primary:hover { box-shadow: 0 10px 26px -8px rgba(37,99,235,.75); }
+.feature, .step, .credit-ex { transition: transform .18s ease, border-color .18s ease, background .18s ease; }
+.feature:hover, .step:hover { transform: translateY(-4px); border-color: var(--line-2); }
+.credit-ex:hover { transform: translateY(-3px); border-color: var(--accent); }
+.feature .ic { transition: transform .2s ease; }
+.feature:hover .ic { transform: scale(1.08) rotate(-3deg); }
+.brand .logo { transition: transform .2s ease; }
+.brand:hover .logo { transform: rotate(-6deg) scale(1.05); }
+.hero-figure { transition: transform .3s ease, box-shadow .3s ease; }
+.hero-figure:hover { transform: translateY(-3px); box-shadow: 0 40px 90px -30px rgba(0,0,0,.8); }
+.stat, .table-wrap { transition: border-color .18s ease; }
+.stat:hover { border-color: var(--line-2); }
+.input, .field input, .field select { transition: border-color .15s ease, box-shadow .15s ease; }
+.input:focus, .field input:focus, .field select:focus { box-shadow: 0 0 0 3px var(--accent-soft); }
+.js-grant { transition: all .15s ease; }
+table.data tr { transition: background .12s ease; }
+.credits-pill { transition: color .2s ease, border-color .2s ease; }
+.credits-pill b { transition: color .25s ease; }
+.nav { animation: nf-fade .3s ease both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001s !important; animation-iteration-count: 1 !important; transition-duration: .001s !important; }
+}
+
 .hidden { display: none !important; }
 @media (max-width: 720px) {
   .nav { padding: 0 16px; }

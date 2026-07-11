@@ -10,13 +10,25 @@ import {
 
 /** Shared helpers for turning raw imported rings into engine-ready parts. */
 
+import type { Mat } from './matrix';
+
 export const MAX_PARTS = 400;
 export const MIN_PART_AREA_MM2 = 1;
 export const SIMPLIFY_TOLERANCE_MM = 0.2;
 
+/** Original vector geometry of a part, for exact (curve-preserving) rendering/export. */
+export interface VectorSource {
+  /** Geometry element in the part's local coordinate space (no transform/style). */
+  markup: string;
+  /** Local → mm-frame transform (scale × CTM); placement is applied on top. */
+  matrix: Mat;
+}
+
 export interface ImportResult {
   parts: Part[];
   warnings: string[];
+  /** Per-part original geometry (present for SVG imports). */
+  sources?: Map<string, VectorSource>;
 }
 
 /** Groups rings into contours: largest rings are outers, rings inside them holes. */
@@ -60,10 +72,11 @@ export function contoursToParts(
   contours: Contour[],
   mmPerUnit: number,
   toleranceMm = SIMPLIFY_TOLERANCE_MM,
+  startIndex = 0,
 ): ImportResult {
   const parts: Part[] = [];
   const warnings: string[] = [];
-  let idx = 0;
+  let idx = startIndex;
   for (const c of contours) {
     const outer = finalizeRing(c.outer, mmPerUnit, toleranceMm);
     if (outer.length < 3 || ringArea(outer) < MIN_PART_AREA_MM2) continue;

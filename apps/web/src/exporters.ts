@@ -13,9 +13,13 @@ function download(filename: string, text: string, mime: string): void {
   URL.revokeObjectURL(url);
 }
 
-/** Exports the nested layout as a standalone SVG file. */
-export function exportSvg(result: NestResult, parts: Part[]): void {
-  download('nestflow-layout.svg', resultToSVG(result, parts), 'image/svg+xml');
+/** Exports the nested layout as a standalone SVG file (exact geometry if given). */
+export function exportSvg(
+  result: NestResult,
+  parts: Part[],
+  partSvg?: (partId: string, placement: NestResult['placements'][number]) => string | null,
+): void {
+  download('nestflow-layout.svg', resultToSVG(result, parts, partSvg ? { partSvg } : {}), 'image/svg+xml');
 }
 
 /**

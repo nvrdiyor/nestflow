@@ -23,6 +23,13 @@ export interface RenderOptions {
   strokeWidth?: number;
   /** If provided, overlays the optimised cut path and common-line runs. */
   cutPlans?: CutPlan[];
+  /**
+   * Optional per-placement override that returns SVG markup for the part in
+   * world (sheet-local) coordinates — used to draw the ORIGINAL imported vector
+   * (curves intact, exact size) instead of the flattened nesting polygon.
+   * Return null to fall back to the flattened contour.
+   */
+  partSvg?: (partId: string, placement: Placement) => string | null;
 }
 
 const PALETTE = [
@@ -120,6 +127,12 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
     for (const placement of bySheet[s] as Placement[]) {
       const part = partMap.get(placement.partId);
       if (!part) continue;
+      const override = options.partSvg?.(placement.partId, placement) ?? null;
+      if (override !== null) {
+        // Caller-supplied original geometry, in world coords; offset to the sheet.
+        svg.push(`<g transform="translate(${ox.toFixed(3)} ${oy.toFixed(3)})">${override}</g>`);
+        continue;
+      }
       const contour = placementContour(part, placement);
       const color = colorFor(placement.partId);
       svg.push(

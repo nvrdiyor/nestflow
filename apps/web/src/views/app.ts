@@ -20,6 +20,8 @@ import { nestCost } from '../cost';
 import { estimateSheet, fitToParts } from '../autofit';
 import { previewSvg } from '../preview';
 import { t, wireLangSwitch } from '../i18n';
+import type { VectorSource } from '../importCommon';
+import { partSvgFor } from '../sourceRender';
 
 type Nav = (hash: string) => void;
 
@@ -56,6 +58,13 @@ const toolMarkup = (): string => `
     </section>
     <section class="group">
       <h2>${t('app.sheet')}</h2>
+      <label class="field" style="margin-bottom:10px"><span>${t('app.machine')}</span>
+        <select id="machinePreset">
+          <option value="custom">${t('app.custom')}</option>
+          <option value="laser">Lazer — 1210 × 900 · 2mm</option>
+          <option value="rover">Rover — 2400 × 1200 · 10mm</option>
+        </select>
+      </label>
       <label class="check" style="margin-bottom:10px"><input id="fitSheet" type="checkbox" checked /> <span>${t('app.fitSheet')}</span></label>
       <div class="row">
         <label class="field"><span>${t('app.width')}</span><input id="sheetW" type="number" value="800" min="50" step="10" /></label>
@@ -129,6 +138,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   let lastParts: Part[] = [];
   let lastResult: NestResult | null = null;
   let lastPlans: CutPlan[] = [];
+  let sources = new Map<string, VectorSource>();
   let busy = false;
   let runCtx: { instances: number; strategy: Strategy; cost: number; parts: Part[] } | null = null;
 
@@ -223,13 +233,29 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     ].join('');
   };
 
+  // Draws each placed part from its ORIGINAL vector (exact curves/size) when a
+  // source is available; returns undefined so the engine keeps its flattened
+  // fallback for sample sets / text / DXF.
+  const makePartSvg = (r: NestResult): ((id: string, p: NestResult['placements'][number]) => string | null) | undefined => {
+    if (!sources.size) return undefined;
+    const worldStroke = Math.max(r.config.sheet.width, r.config.sheet.height) / 400;
+    return (partId, placement) => {
+      const src = sources.get(partId);
+      return src ? partSvgFor(src, placement, worldStroke) : null;
+    };
+  };
+
   // Pure: draws the layout + metrics for `lastResult`/`lastParts`. Never charges,
   // so it is safe to call from the "Show cut path" toggle at any time.
   const render = (r: NestResult): void => {
     lastResult = r;
     lastPlans = planCutPath(r, lastParts);
     const cm = cutMetrics(lastPlans, currentConfig());
-    viewport.innerHTML = resultToSVG(r, lastParts, checked('showPath') ? { cutPlans: lastPlans } : {});
+    const partSvg = makePartSvg(r);
+    viewport.innerHTML = resultToSVG(r, lastParts, {
+      ...(checked('showPath') ? { cutPlans: lastPlans } : {}),
+      ...(partSvg ? { partSvg } : {}),
+    });
     renderMetrics(r, cm);
     exportSvgBtn.disabled = false;
     exportDxfBtn.disabled = false;
@@ -329,13 +355,15 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     importedText = text;
     importedName = name;
     const scale = num('scale') || 1;
-    const { parts, warnings } = isDxf(text, name) ? importDxfParts(text, scale) : importSvgParts(text, scale);
+    const result = isDxf(text, name) ? importDxfParts(text, scale) : importSvgParts(text, scale);
+    const { parts, warnings } = result;
     if (!parts.length) {
       importInfo.textContent = warnings[0] ?? 'No shapes found.';
       importInfo.classList.add('warn');
       return;
     }
     importedParts = parts;
+    sources = result.sources ?? new Map(); // exact geometry for SVG imports
     mode = 'imported';
     importInfo.classList.toggle('warn', warnings.length > 0);
     importInfo.textContent = `Imported ${parts.length} shapes from ${isDxf(text, name) ? 'DXF' : 'SVG'}${
@@ -389,6 +417,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
         return;
       }
       importedParts = parts;
+      sources = new Map(); // letters use the engine's own rendering
       mode = 'imported';
       importedText = null;
       importedName = '';
@@ -416,6 +445,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   });
   el('sampleSet').addEventListener('change', () => {
     mode = 'sample';
+    sources = new Map();
     importInfo.classList.remove('warn');
     importInfo.textContent = t('app.usingSample');
     updateCostLabel();
@@ -425,8 +455,26 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     syncSheetInputs();
     updateCostLabel();
   });
+  el('machinePreset').addEventListener('change', () => {
+    const v = el<HTMLSelectElement>('machinePreset').value;
+    // Beds are given in cm in the label; set the real mm size + spacing here.
+    const presets: Record<string, { w: number; h: number; spacing: number }> = {
+      laser: { w: 1210, h: 900, spacing: 2 },
+      rover: { w: 2400, h: 1200, spacing: 10 },
+    };
+    const p = presets[v];
+    if (p) {
+      el<HTMLInputElement>('sheetW').value = String(p.w);
+      el<HTMLInputElement>('sheetH').value = String(p.h);
+      el<HTMLInputElement>('spacing').value = String(p.spacing);
+      el<HTMLInputElement>('fitSheet').checked = false; // use the real bed; overflow to more sheets
+    }
+    syncSheetInputs();
+    updateCostLabel();
+    showPreview(t('app.ready'));
+  });
   runBtn.addEventListener('click', run);
-  exportSvgBtn.addEventListener('click', () => lastResult && exportSvg(lastResult, lastParts));
+  exportSvgBtn.addEventListener('click', () => lastResult && exportSvg(lastResult, lastParts, makePartSvg(lastResult)));
   exportDxfBtn.addEventListener('click', () => lastResult && exportDxf(lastResult, lastParts));
   el('showPath').addEventListener('change', () => {
     if (lastResult) render(lastResult);
