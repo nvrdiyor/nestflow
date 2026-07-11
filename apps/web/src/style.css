@@ -1,6 +1,6 @@
 /* Nesting-tool view styles. Global tokens/reset live in app.css. */
 
-.tool-view { display: flex; flex-direction: column; min-height: calc(100vh - 60px); }
+.tool-view { display: flex; flex-direction: column; height: calc(100vh - 64px); overflow: hidden; }
 
 .layout { flex: 1; display: grid; grid-template-columns: 308px 1fr; min-height: 0; }
 .panel {
@@ -65,7 +65,7 @@
 .secondary:hover:not(:disabled) { border-color: var(--accent); }
 .secondary:disabled { opacity: .45; cursor: default; }
 
-.stage { padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.stage { padding: 16px 18px; overflow: hidden; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
 .metrics .card { background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.012)); border: 1px solid var(--line); border-radius: 13px; padding: 13px 15px; transition: border-color .18s, transform .18s; }
 .metrics .card:hover { border-color: var(--line-2); transform: translateY(-2px); }
@@ -75,12 +75,30 @@
 .metrics .card.good .v { color: var(--good); }
 
 .viewport {
-  flex: 1; min-height: 360px; border: 1px solid var(--line);
+  position: relative; flex: 1; min-height: 360px; border: 1px solid var(--line);
   background: radial-gradient(600px 300px at 50% 0%, rgba(91,140,255,.06), transparent 60%), rgba(255,255,255,.012);
-  border-radius: 16px; display: grid; place-items: center; padding: 14px; overflow: auto;
+  border-radius: 16px; overflow: hidden; cursor: grab; touch-action: none;
 }
-.viewport svg { max-width: 100%; height: auto; }
+.viewport.grabbing { cursor: grabbing; }
+.svg-host { position: absolute; top: 0; left: 0; width: 100%; will-change: transform; }
+.svg-host svg { width: 100%; height: auto; display: block; }
+.svg-host .placeholder { color: var(--muted); font-size: 14px; text-align: center; padding: 120px 20px; }
 .placeholder { color: var(--muted); font-size: 14px; }
+
+.zoom-ctl {
+  position: absolute; right: 12px; bottom: 12px; z-index: 5;
+  display: flex; align-items: center; gap: 3px; padding: 4px;
+  background: rgba(10, 13, 20, 0.72); backdrop-filter: blur(10px);
+  border: 1px solid var(--line-2); border-radius: 11px;
+}
+.zoom-ctl button {
+  width: 30px; height: 30px; display: grid; place-items: center;
+  background: transparent; border: 0; color: var(--muted); border-radius: 8px; cursor: pointer;
+  transition: background .14s, color .14s;
+}
+.zoom-ctl button:hover { background: var(--panel-2); color: var(--text); }
+.zoom-ctl button i[data-lucide], .zoom-ctl button svg { width: 16px; height: 16px; }
+.zoom-ctl .lvl { font-size: 12px; color: var(--muted); min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
 
 @media (max-width: 820px) {
   .layout { grid-template-columns: 1fr; }

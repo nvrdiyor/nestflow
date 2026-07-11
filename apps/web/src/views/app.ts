@@ -22,6 +22,7 @@ import { previewSvg } from '../preview';
 import { t, wireLangSwitch } from '../i18n';
 import type { VectorSource } from '../importCommon';
 import { partSvgFor } from '../sourceRender';
+import { createZoomPan, type ZoomPan } from '../zoomPan';
 
 type Nav = (hash: string) => void;
 
@@ -113,7 +114,15 @@ const toolMarkup = (): string => `
   </aside>
   <section class="stage">
     <div class="metrics" id="metrics"></div>
-    <div class="viewport" id="viewport"></div>
+    <div class="viewport" id="viewport">
+      <div class="svg-host" id="svgHost"></div>
+      <div class="zoom-ctl">
+        <button class="js-zoom-out" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button>
+        <span class="lvl js-zoom-lvl">100%</span>
+        <button class="js-zoom-in" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button>
+        <button class="js-zoom-fit" title="Fit" aria-label="Fit to view"><i data-lucide="maximize"></i></button>
+      </div>
+    </div>
   </section>
 </main></div>`;
 
@@ -139,6 +148,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   let lastResult: NestResult | null = null;
   let lastPlans: CutPlan[] = [];
   let sources = new Map<string, VectorSource>();
+  let zoom: ZoomPan | null = null;
   let busy = false;
   let runCtx: { instances: number; strategy: Strategy; cost: number; parts: Part[] } | null = null;
 
@@ -198,9 +208,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // Instant, free preview of the current parts (before a real nest is run).
   const showPreview = (label: string): void => {
     const parts = currentParts();
-    viewport.innerHTML = parts.length
+    el('svgHost').innerHTML = parts.length
       ? previewSvg(parts)
       : '<div class="placeholder">No parts yet.</div>';
+    zoom?.fit();
     exportSvgBtn.disabled = true;
     exportDxfBtn.disabled = true;
     lastResult = null;
@@ -252,10 +263,11 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     lastPlans = planCutPath(r, lastParts);
     const cm = cutMetrics(lastPlans, currentConfig());
     const partSvg = makePartSvg(r);
-    viewport.innerHTML = resultToSVG(r, lastParts, {
+    el('svgHost').innerHTML = resultToSVG(r, lastParts, {
       ...(checked('showPath') ? { cutPlans: lastPlans } : {}),
       ...(partSvg ? { partSvg } : {}),
     });
+    zoom?.fit();
     renderMetrics(r, cm);
     exportSvgBtn.disabled = false;
     exportDxfBtn.disabled = false;
@@ -491,6 +503,14 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   });
   wireLangSwitch(root);
 
+  const vq = (sel: string): HTMLElement => viewport.querySelector(sel) as HTMLElement;
+  zoom = createZoomPan(viewport, el('svgHost'), {
+    in: vq('.js-zoom-in'),
+    out: vq('.js-zoom-out'),
+    fit: vq('.js-zoom-fit'),
+    level: vq('.js-zoom-lvl'),
+  });
+
   updateCostLabel();
   syncSheetInputs();
   showPreview(t('app.previewHint'));
@@ -507,5 +527,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       // Network failure: keep the cached view usable; charging will surface errors.
     });
 
-  return () => worker.terminate();
+  return () => {
+    worker.terminate();
+    zoom?.destroy();
+  };
 }

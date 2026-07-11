@@ -8,6 +8,7 @@ import {
   ArrowRight,
   Download,
   LayoutGrid,
+  Maximize,
   Puzzle,
   Ruler,
   Scissors,
@@ -15,6 +16,8 @@ import {
   Sparkles,
   Type,
   Upload,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide';
 import { isLoggedIn } from './api';
 import { getLang } from './i18n';
@@ -26,7 +29,7 @@ import { renderAdmin } from './views/admin';
 const root = document.getElementById('app') as HTMLElement;
 let cleanup: (() => void) | null = null;
 
-const LUCIDE = { ArrowRight, Download, LayoutGrid, Puzzle, Ruler, Scissors, Settings2, Sparkles, Type, Upload };
+const LUCIDE = { ArrowRight, Download, LayoutGrid, Maximize, Puzzle, Ruler, Scissors, Settings2, Sparkles, Type, Upload, ZoomIn, ZoomOut };
 AOS.init({ duration: 620, easing: 'ease-out-cubic', once: true, offset: 40 });
 
 /** Swap in Lucide icons and (re)collect AOS reveal targets after a view renders. */
