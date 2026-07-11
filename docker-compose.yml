@@ -1,0 +1,45 @@
+# NestFlow AI — VPS deployment.
+#
+#   IP-only (http://SERVER_IP):
+#     docker compose up -d --build
+#
+#   With a domain + automatic HTTPS (in .env set DOMAIN=your-domain.com and
+#   HTTP_PORT=127.0.0.1:8787 so Caddy owns ports 80/443):
+#     docker compose --profile https up -d --build
+#
+# Copy .env.deploy.example to .env and set ADMIN_PASSWORD (required).
+
+services:
+  nestflow:
+    build: .
+    restart: unless-stopped
+    environment:
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-nvrdiyor}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:-}
+      STARTING_CREDITS: ${STARTING_CREDITS:-100}
+    volumes:
+      - nestflow-data:/app/apps/api/data
+    ports:
+      - "${HTTP_PORT:-80}:8787"
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on:
+      - nestflow
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env for HTTPS}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    command: sh -c 'printf "%s {\n  reverse_proxy nestflow:8787\n}\n" "$$DOMAIN" > /etc/caddy/Caddyfile && caddy run --config /etc/caddy/Caddyfile'
+
+volumes:
+  nestflow-data:
+  caddy-data:
+  caddy-config:

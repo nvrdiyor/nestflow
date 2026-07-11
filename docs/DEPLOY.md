@@ -19,21 +19,30 @@ State is a single SQLite file — no external database to provision.
 | `CORS_ORIGIN` | No | Set to your domain if you ever host the frontend separately. |
 | `STARTING_CREDITS` | No | Free credits per new account (default 100). |
 
-## Option A — Docker (recommended, any VPS or PaaS)
+## Option A — VPS with docker compose (recommended)
 
 ```bash
-docker build -t nestflow .
-docker run -d --name nestflow \
-  -p 80:8787 \
-  -v nestflow-data:/app/apps/api/data \
-  -e ADMIN_USERNAME=youradmin \
-  -e ADMIN_PASSWORD='a-strong-password' \
-  --restart unless-stopped \
-  nestflow
+# One-time: install Docker (Ubuntu/Debian)
+curl -fsSL https://get.docker.com | sh
+
+git clone https://github.com/nvrdiyor/nestflow.git && cd nestflow
+cp .env.deploy.example .env
+nano .env                        # set ADMIN_PASSWORD (required)
+
+# IP-only (site at http://SERVER_IP):
+docker compose up -d --build
+
+# Or with a domain + free automatic HTTPS:
+#   point your domain's A record to the server IP, then in .env set
+#   DOMAIN=your-domain.com and HTTP_PORT=127.0.0.1:8787
+docker compose --profile https up -d --build
 ```
 
-The named volume keeps users/credits across updates. To update:
-`git pull && docker build -t nestflow . && docker rm -f nestflow && (run again)`.
+Updating to the latest code (data survives in the volume):
+
+```bash
+cd nestflow && git pull && docker compose up -d --build
+```
 
 ## Option B — Bare VPS (Ubuntu + Node + PM2)
 
