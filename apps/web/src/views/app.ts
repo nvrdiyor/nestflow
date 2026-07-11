@@ -23,6 +23,7 @@ import { t, wireLangSwitch } from '../i18n';
 import type { VectorSource } from '../importCommon';
 import { partSvgFor } from '../sourceRender';
 import { createZoomPan, type ZoomPan } from '../zoomPan';
+import { mirrorParts, mirrorSources } from '../mirror';
 
 type Nav = (hash: string) => void;
 
@@ -83,6 +84,8 @@ const toolMarkup = (): string => `
         <label class="field"><span>${t('app.kerf')}</span><input id="kerf" type="number" value="0.2" min="0" step="0.1" /></label>
       </div>
       <label class="check"><input id="holeFilling" type="checkbox" checked /> <span>${t('app.fillHoles')}</span></label>
+      <label class="check" style="margin-top:10px"><input id="mirror" type="checkbox" /> <span>${t('app.mirror')}</span></label>
+      <p class="hint" style="margin-top:6px">${t('app.mirrorHint')}</p>
     </section>
     <section class="group">
       <h2>${t('app.rotations')}</h2>
@@ -161,10 +164,20 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const exportDxfBtn = el<HTMLButtonElement>('exportDxf');
   const creditsEl = root.querySelector<HTMLElement>('.js-credits');
 
-  const currentParts = (): Part[] =>
-    mode === 'imported' && importedParts.length
-      ? importedParts
-      : buildSampleSet(el<HTMLSelectElement>('sampleSet').value as SampleKey);
+  const mirrorOn = (): boolean => checked('mirror');
+  // Keeps the "Mirrored" reminder in the status line while mirror stays on.
+  const readyLabel = (): string => (mirrorOn() ? t('app.mirrorOn') : t('app.ready'));
+
+  const currentParts = (): Part[] => {
+    const base =
+      mode === 'imported' && importedParts.length
+        ? importedParts
+        : buildSampleSet(el<HTMLSelectElement>('sampleSet').value as SampleKey);
+    return mirrorOn() ? mirrorParts(base) : base;
+  };
+
+  // Exact SVG geometry, reflected to match the mirrored parts when mirror is on.
+  const currentSources = (): Map<string, VectorSource> => (mirrorOn() ? mirrorSources(sources) : sources);
 
   const instanceCount = (parts: Part[]): number => parts.reduce((s, p) => s + (p.quantity ?? 1), 0);
 
@@ -248,11 +261,12 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // source is available; returns undefined so the engine keeps its flattened
   // fallback for sample sets / text / DXF.
   const makePartSvg = (r: NestResult): ((id: string, p: NestResult['placements'][number]) => string | null) | undefined => {
-    if (!sources.size) return undefined;
+    const src = currentSources();
+    if (!src.size) return undefined;
     const worldStroke = Math.max(r.config.sheet.width, r.config.sheet.height) / 400;
     return (partId, placement) => {
-      const src = sources.get(partId);
-      return src ? partSvgFor(src, placement, worldStroke) : null;
+      const s = src.get(partId);
+      return s ? partSvgFor(s, placement, worldStroke) : null;
     };
   };
 
@@ -461,11 +475,16 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     importInfo.classList.remove('warn');
     importInfo.textContent = t('app.usingSample');
     updateCostLabel();
-    showPreview(t('app.ready'));
+    showPreview(readyLabel());
   });
   el('fitSheet').addEventListener('change', () => {
     syncSheetInputs();
     updateCostLabel();
+  });
+  el('mirror').addEventListener('change', () => {
+    // Re-preview reflected parts; nulling lastResult keeps a later render/export
+    // from mixing a fresh mirror state with a result nested under the old one.
+    showPreview(readyLabel());
   });
   el('machinePreset').addEventListener('change', () => {
     const v = el<HTMLSelectElement>('machinePreset').value;
@@ -483,7 +502,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     }
     syncSheetInputs();
     updateCostLabel();
-    showPreview(t('app.ready'));
+    showPreview(readyLabel());
   });
   runBtn.addEventListener('click', run);
   exportSvgBtn.addEventListener('click', () => lastResult && exportSvg(lastResult, lastParts, makePartSvg(lastResult)));
