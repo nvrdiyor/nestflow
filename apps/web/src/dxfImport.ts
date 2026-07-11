@@ -1,5 +1,6 @@
 import type { Point, Ring } from '@nestflow/engine';
 import { contoursToParts, ringsToContours, type ImportResult } from './importCommon';
+import { sampleBspline } from './bspline';
 
 /**
  * DXF importer (browser, pure text — no DOM needed).
@@ -283,23 +284,34 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
         break;
       }
       case 'SPLINE': {
-        // Approximate by its fit points (code 11/21), else control points (10/20).
+        // Evaluate the actual B-spline (de Boor) instead of connecting control
+        // points, which are NOT on the curve. Order-following pairing of 10/20
+        // (control) and 11/21 (fit) is required — the codes interleave.
+        const flags = first(g.pairs, 70) ?? 0;
+        const degree = first(g.pairs, 71) ?? 3;
+        const knots: number[] = [];
+        const ctrl: Point[] = [];
         const fit: Point[] = [];
-        for (let i = 0; i < g.pairs.length; i++) {
-          if (g.pairs[i]!.code === 11) {
-            fit.push({ x: Number.parseFloat(g.pairs[i]!.value), y: first(g.pairs.slice(i), 21) ?? 0 });
+        let cx: number | undefined;
+        let fx: number | undefined;
+        for (const p of g.pairs) {
+          if (p.code === 40) knots.push(Number.parseFloat(p.value));
+          else if (p.code === 10) cx = Number.parseFloat(p.value);
+          else if (p.code === 20 && cx !== undefined) {
+            ctrl.push({ x: cx, y: Number.parseFloat(p.value) });
+            cx = undefined;
+          } else if (p.code === 11) fx = Number.parseFloat(p.value);
+          else if (p.code === 21 && fx !== undefined) {
+            fit.push({ x: fx, y: Number.parseFloat(p.value) });
+            fx = undefined;
           }
         }
-        let pts = fit;
-        if (pts.length < 2) {
-          const ctrl: Point[] = [];
-          const xs = g.pairs.filter((p) => p.code === 10).map((p) => Number.parseFloat(p.value));
-          const ys = g.pairs.filter((p) => p.code === 20).map((p) => Number.parseFloat(p.value));
-          for (let i = 0; i < Math.min(xs.length, ys.length); i++) ctrl.push({ x: xs[i]!, y: ys[i]! });
-          pts = ctrl;
-        }
+        let pts: Point[] = [];
+        if (ctrl.length >= 2) pts = sampleBspline(ctrl, degree, knots);
+        else if (fit.length >= 2) pts = fit;
         if (pts.length >= 2) {
-          openSegments.push(pts);
+          if ((Number(flags) & 1) === 1) closedRings.push(pts as Ring);
+          else openSegments.push(pts);
           splines++;
         }
         break;
@@ -331,9 +343,9 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
   const chained = chainLoops(openSegments, tol);
   const rings = [...closedRings, ...chained.rings];
 
-  if (inserts > 0) warnings.push(`${inserts} block insert(s) skipped (not expanded).`);
-  if (splines > 0) warnings.push(`${splines} spline(s) approximated.`);
-  if (chained.openCount > 0) warnings.push(`${chained.openCount} open chain(s) could not be closed.`);
+  if (inserts > 0) warnings.push(`${inserts} block insert(s) skipped — explode blocks before export.`);
+  if (chained.openCount > 0) warnings.push(`${chained.openCount} open outline(s) could not be closed.`);
+  void splines;
 
   const result = contoursToParts(ringsToContours(rings), mmPerUnit);
   result.warnings.unshift(...warnings);
