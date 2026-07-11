@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+**/dist
+apps/api/data
+.git
+.env
+**/.env
+**/examples/output
+*.log
+.claude

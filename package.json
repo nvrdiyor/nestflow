@@ -12,13 +12,19 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "dev": "concurrently -k -n api,web -c blue,green \"npm run dev -w @nestflow/api\" \"npm run dev -w @nestflow/web\"",
+    "build": "npm run build -w @nestflow/engine && npm run build -w @nestflow/web && npm run build -w @nestflow/api",
+    "start": "node apps/api/dist/index.js",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "web": "npm run dev -w @nestflow/web",
+    "api": "npm run dev -w @nestflow/api",
     "engine:test": "npm run test -w @nestflow/engine",
     "engine:demo": "npm run demo -w @nestflow/engine",
     "engine:bench": "npm run bench -w @nestflow/engine"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   },
   "license": "UNLICENSED"
 }

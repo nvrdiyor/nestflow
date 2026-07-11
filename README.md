@@ -22,14 +22,14 @@ for a shipped feature.
 | Area | State |
 | --- | --- |
 | **`@nestflow/engine`** — NFP/Minkowski geometry, GA + simulated annealing, hole filling, multi-sheet, metrics, SVG render | ✅ **Implemented, 39 passing tests, runnable demo + benchmark** |
-| **`apps/web`** — browser playground (Vite): upload, controls, live nested layout, export; engine runs in a Web Worker | ✅ **Runnable now — `npm run web`** |
-| **File import — SVG + DXF** (browser): curves/arcs/bulges flattened, holes detected, loops chained | ✅ In the playground |
-| **Text → letters** — type a word, cut its glyphs (counters/holes detected, tight nesting) | ✅ In the playground |
-| **Common-line cutting** — detect shared edges (cut once), optimise cut order (NN + 2-opt), savings metric | ✅ Engine + playground |
-| **Export — SVG + DXF** (machine-ready, mm units) | ✅ In the playground |
-| Monorepo tooling (npm workspaces, TS project refs) | ✅ In place |
-| File import PLT/EPS/PDF; headless parser package for the API | ⛏️ Planned — see roadmap |
-| Full web app (Next.js, Konva editor, dashboard, auth) | ⛏️ Planned |
+| **`apps/web`** — full web app: landing page, email/password auth, credit-metered nesting tool, admin dashboard | ✅ **Runnable — `npm run dev`** |
+| **`apps/api`** — backend (Fastify + built-in SQLite + JWT): server-side auth, atomic credit charging, admin API; serves the built app in production | ✅ **12 passing tests** |
+| **File import — SVG + DXF** (browser): curves/arcs/bulges flattened, holes detected, loops chained | ✅ In the app |
+| **Text → letters** — type a word, cut its glyphs (counters/holes detected, tight nesting) | ✅ In the app |
+| **Common-line cutting** — detect shared edges (cut once), optimise cut order (NN + 2-opt), savings metric | ✅ Engine + app |
+| **Export — SVG + DXF** (machine-ready, mm units) | ✅ In the app |
+| **Deploy** — single container/process serves API + app; Dockerfile + [docs/DEPLOY.md](docs/DEPLOY.md) | ✅ Ready |
+| File import PLT/EPS/PDF; payments (Stripe); Konva editor; Postgres for multi-node | ⛏️ Planned — see roadmap |
 | Backend API (NestJS, Prisma, Redis/BullMQ) | ⛏️ Planned |
 | Auth, billing, storage, admin | ⛏️ Planned |
 
@@ -58,17 +58,17 @@ nestflow/
 ## Quick start (engine)
 
 ```bash
-npm install                          # installs workspace deps
-npm run web                          # start the browser playground -> http://localhost:5173
-npm run engine:test                  # run the engine test suite (vitest)
-npm run engine:demo                  # nest a sample job -> SVG in packages/engine/examples/output
-npm run engine:bench                 # scaling benchmark
+npm install
+npm run dev                          # API (:8787) + web app (:5173) together
+npm test                             # engine (47 tests) + API (12 tests)
+npm run build && npm start           # production: one process serves app + API
+npm run engine:demo                  # nest a sample job -> SVG files
 ```
 
-The **playground** (`apps/web`) is the quickest way to *see and test* the engine:
-pick a part set, sheet size, spacing, rotations, and strategy, hit **Nest layout**,
-and watch the packed sheet and metrics update. The engine runs in a Web Worker,
-so even the `max` strategy never freezes the UI.
+Open http://localhost:5173 — sign up (100 free credits), nest letters or your
+own SVG/DXF, export a machine-ready file. The admin dashboard lives at `#/admin`.
+Nesting runs in a Web Worker in the browser; the API owns auth and credit
+accounting (prices recomputed server-side). Deployment: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 The demo nests a realistic 47-part sign-shop job onto an 800×600 mm sheet and
 writes an SVG you can open in any browser. On the sample job the engine fits

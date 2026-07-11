@@ -13,3 +13,8 @@ out/
 tmp/
 .vitest/
 **/examples/output/
+apps/api/data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm

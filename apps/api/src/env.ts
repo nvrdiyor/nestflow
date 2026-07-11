@@ -1,0 +1,59 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * Environment configuration for the NestFlow API.
+ *
+ * A tiny dependency-free .env loader: KEY=VALUE lines, `#` comments, values
+ * already present in process.env win. The JWT secret is auto-generated and
+ * persisted on first boot so a bare `npm start` is secure by default; set
+ * JWT_SECRET explicitly when running multiple instances.
+ */
+
+const here = dirname(fileURLToPath(import.meta.url));
+/** apps/api directory (works from both src/ via tsx and dist/ via node). */
+export const API_ROOT = resolve(here, '..');
+
+function loadDotEnv(): void {
+  const file = join(API_ROOT, '.env');
+  if (!existsSync(file)) return;
+  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '');
+    if (!(key in process.env)) process.env[key] = value;
+  }
+}
+
+loadDotEnv();
+
+export const DATA_DIR = process.env.DATA_DIR ? resolve(process.env.DATA_DIR) : join(API_ROOT, 'data');
+mkdirSync(DATA_DIR, { recursive: true });
+
+function jwtSecret(): string {
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  const file = join(DATA_DIR, 'jwt-secret');
+  if (existsSync(file)) return readFileSync(file, 'utf8').trim();
+  const secret = randomBytes(32).toString('hex');
+  writeFileSync(file, secret, { encoding: 'utf8' });
+  return secret;
+}
+
+export const env = {
+  port: Number(process.env.PORT) || 8787,
+  host: process.env.HOST || '0.0.0.0',
+  jwtSecret: jwtSecret(),
+  dbFile: process.env.DB_FILE || join(DATA_DIR, 'nestflow.db'),
+  /** Admin credentials — override in production via env / .env. */
+  adminUsername: process.env.ADMIN_USERNAME || 'nvrdiyor',
+  adminPassword: process.env.ADMIN_PASSWORD || 'd__Iyorbek7777',
+  /** Directory of the built frontend to serve (empty = API only). */
+  webDist: process.env.WEB_DIST ?? resolve(API_ROOT, '..', 'web', 'dist'),
+  corsOrigin: process.env.CORS_ORIGIN || true,
+  startingCredits: Number(process.env.STARTING_CREDITS) || 100,
+} as const;

@@ -1,0 +1,414 @@
+import {
+  cutMetrics,
+  planCutPath,
+  resultToSVG,
+  type CutMetrics,
+  type CutPlan,
+  type NestConfig,
+  type NestResult,
+  type Part,
+  type Strategy,
+} from '@nestflow/engine';
+import { buildSampleSet, type SampleKey } from '../samples';
+import { importSvgParts } from '../svgImport';
+import { importDxfParts } from '../dxfImport';
+import { textToParts } from '../textToParts';
+import { exportDxf, exportSvg } from '../exporters';
+import { appNavMarkup } from '../ui/nav';
+import * as api from '../api';
+import { nestCost } from '../cost';
+
+type Nav = (hash: string) => void;
+
+const TOOL_MARKUP = `
+<div class="tool-view"><main class="layout">
+  <aside class="panel">
+    <section class="group">
+      <h2>Your parts</h2>
+      <div id="drop" class="drop">
+        <input id="file" type="file" accept=".svg,.dxf,image/svg+xml" hidden />
+        <span class="drop-ic">⬆</span>
+        <span>Drop an <b>SVG</b> or <b>DXF</b> here, or <button type="button" id="browse" class="link">browse</button></span>
+      </div>
+      <div class="row"><label class="field"><span>Scale (mm / unit)</span><input id="scale" type="number" value="1" min="0.01" step="0.1" /></label></div>
+      <div class="textgen">
+        <label class="field"><span>…or type letters to cut</span><input id="text" type="text" value="ASSALOMU ALEYKUM" /></label>
+        <div class="row">
+          <label class="field"><span>Letter height (mm)</span><input id="letterH" type="number" value="80" min="5" step="5" /></label>
+          <button id="makeText" class="secondary">Make letters</button>
+        </div>
+      </div>
+      <p id="importInfo" class="hint">Using a built-in sample set.</p>
+    </section>
+    <section class="group">
+      <h2>Sample set</h2>
+      <label class="field"><span>Or pick a demo</span>
+        <select id="sampleSet">
+          <option value="signshop">Sign shop (rings, triangles, brackets)</option>
+          <option value="letters">Letters &amp; rings (hole filling)</option>
+          <option value="rects">Rectangles &amp; bars</option>
+          <option value="dense">Dense mixed (stress test)</option>
+        </select>
+      </label>
+    </section>
+    <section class="group">
+      <h2>Sheet (mm)</h2>
+      <div class="row">
+        <label class="field"><span>Width</span><input id="sheetW" type="number" value="800" min="50" step="10" /></label>
+        <label class="field"><span>Height</span><input id="sheetH" type="number" value="600" min="50" step="10" /></label>
+      </div>
+      <div class="row">
+        <label class="field"><span>Margin</span><input id="margin" type="number" value="5" min="0" step="1" /></label>
+        <label class="field"><span>Sheet $</span><input id="sheetCost" type="number" value="45" min="0" step="1" /></label>
+      </div>
+    </section>
+    <section class="group">
+      <h2>Cutting</h2>
+      <div class="row">
+        <label class="field"><span>Spacing</span><input id="spacing" type="number" value="3" min="0" step="0.5" /></label>
+        <label class="field"><span>Kerf</span><input id="kerf" type="number" value="0.2" min="0" step="0.1" /></label>
+      </div>
+      <label class="check"><input id="holeFilling" type="checkbox" checked /> <span>Fill holes with small parts</span></label>
+    </section>
+    <section class="group">
+      <h2>Rotations</h2>
+      <div class="chips">
+        <label class="chip"><input type="checkbox" class="rot" value="0" checked />0°</label>
+        <label class="chip"><input type="checkbox" class="rot" value="90" checked />90°</label>
+        <label class="chip"><input type="checkbox" class="rot" value="180" checked />180°</label>
+        <label class="chip"><input type="checkbox" class="rot" value="270" checked />270°</label>
+      </div>
+    </section>
+    <section class="group">
+      <h2>Optimization</h2>
+      <div class="segmented" id="strategy">
+        <button data-val="fast" class="active">Fast</button>
+        <button data-val="balanced">Balanced</button>
+        <button data-val="max">Max saving</button>
+      </div>
+      <label class="check" style="margin-top:12px"><input id="showPath" type="checkbox" /> <span>Show cut path &amp; <span style="color:#f97316">common lines</span></span></label>
+    </section>
+    <button id="run" class="primary">Nest layout</button>
+    <p id="status" class="status">Ready.</p>
+    <section class="group">
+      <h2>Export</h2>
+      <div class="exports">
+        <button id="exportSvg" class="secondary" disabled>Download SVG</button>
+        <button id="exportDxf" class="secondary" disabled>Download DXF</button>
+      </div>
+    </section>
+  </aside>
+  <section class="stage">
+    <div class="metrics" id="metrics"></div>
+    <div class="viewport" id="viewport"><div class="placeholder">Press <b>Nest layout</b> to run the engine.</div></div>
+  </section>
+</main></div>`;
+
+export function renderApp(root: HTMLElement, navigate: Nav): () => void {
+  const user = api.cachedUser();
+  if (!api.isLoggedIn() || !user) {
+    navigate('#/login');
+    return () => {};
+  }
+  root.innerHTML = appNavMarkup(user) + TOOL_MARKUP;
+
+  const worker = new Worker(new URL('../nest.worker.ts', import.meta.url), { type: 'module' });
+  const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
+  const num = (id: string): number => Number(el<HTMLInputElement>(id).value) || 0;
+  const checked = (id: string): boolean => el<HTMLInputElement>(id).checked;
+
+  let strategy: Strategy = 'fast';
+  let mode: 'sample' | 'imported' = 'sample';
+  let importedParts: Part[] = [];
+  let importedText: string | null = null;
+  let importedName = '';
+  let lastParts: Part[] = [];
+  let lastResult: NestResult | null = null;
+  let lastPlans: CutPlan[] = [];
+  let busy = false;
+  let runCtx: { instances: number; strategy: Strategy; cost: number; parts: Part[] } | null = null;
+
+  const statusEl = el('status');
+  const runBtn = el<HTMLButtonElement>('run');
+  const viewport = el('viewport');
+  const metricsEl = el('metrics');
+  const importInfo = el('importInfo');
+  const exportSvgBtn = el<HTMLButtonElement>('exportSvg');
+  const exportDxfBtn = el<HTMLButtonElement>('exportDxf');
+  const creditsEl = root.querySelector<HTMLElement>('.js-credits');
+
+  const currentParts = (): Part[] =>
+    mode === 'imported' && importedParts.length
+      ? importedParts
+      : buildSampleSet(el<HTMLSelectElement>('sampleSet').value as SampleKey);
+
+  const instanceCount = (parts: Part[]): number => parts.reduce((s, p) => s + (p.quantity ?? 1), 0);
+
+  const currentConfig = (): NestConfig => {
+    const rotations = Array.from(document.querySelectorAll<HTMLInputElement>('.rot:checked')).map((r) => Number(r.value));
+    const timeLimitMs = strategy === 'max' ? 8000 : strategy === 'balanced' ? 4000 : undefined;
+    const config: NestConfig = {
+      sheet: { width: num('sheetW'), height: num('sheetH'), margin: num('margin'), cost: num('sheetCost') },
+      units: 'mm',
+      rotations: rotations.length ? rotations : [0],
+      spacing: num('spacing'),
+      kerf: num('kerf'),
+      holeFilling: checked('holeFilling'),
+      strategy,
+      seed: 12345,
+      machine: { cutSpeed: 25, travelSpeed: 200, hourlyRate: 75, pierceTime: 0.4 },
+    };
+    if (timeLimitMs) config.timeLimitMs = timeLimitMs;
+    return config;
+  };
+
+  const updateCostLabel = (): void => {
+    const cost = nestCost(instanceCount(currentParts()), strategy);
+    runBtn.textContent = `Nest layout · ${cost} credit${cost === 1 ? '' : 's'}`;
+  };
+
+  const updateCreditsPill = (credits: number): void => {
+    if (creditsEl) {
+      creditsEl.textContent = String(credits);
+      creditsEl.parentElement?.classList.toggle('low', credits <= 10);
+    }
+  };
+
+  const metricCard = (label: string, value: string, good = false): string =>
+    `<div class="card${good ? ' good' : ''}"><div class="k">${label}</div><div class="v">${value}</div></div>`;
+
+  const renderMetrics = (r: NestResult, cm: CutMetrics): void => {
+    const m = r.metrics;
+    const cutSec = cm.estimatedCutTimeSec || m.estimatedCutTimeSec;
+    const mins = Math.floor(cutSec / 60);
+    const secs = Math.round(cutSec % 60);
+    metricsEl.innerHTML = [
+      metricCard('Sheets used', `${r.sheetsUsed} <small>/ naive ${m.baselineSheets}</small>`),
+      metricCard('Utilization', `${(m.utilization * 100).toFixed(1)}<small>%</small>`),
+      metricCard('Saved', `$${m.savedMoney.toFixed(0)}`, m.savedMoney > 0),
+      metricCard('Cut length', `${(cm.effectiveCutLength / 1000).toFixed(2)}<small>m</small>`),
+      metricCard('Common-line saved', `${(cm.savedLength / 1000).toFixed(2)}<small>m</small>`, cm.savedLength > 0),
+      metricCard('Cut time', `${mins}<small>m</small> ${secs}<small>s</small>`),
+      metricCard('Unplaced', String(r.unplaced.length), r.unplaced.length === 0),
+    ].join('');
+  };
+
+  // Pure: draws the layout + metrics for `lastResult`/`lastParts`. Never charges,
+  // so it is safe to call from the "Show cut path" toggle at any time.
+  const render = (r: NestResult): void => {
+    lastResult = r;
+    lastPlans = planCutPath(r, lastParts);
+    const cm = cutMetrics(lastPlans, currentConfig());
+    viewport.innerHTML = resultToSVG(r, lastParts, checked('showPath') ? { cutPlans: lastPlans } : {});
+    renderMetrics(r, cm);
+    exportSvgBtn.disabled = false;
+    exportDxfBtn.disabled = false;
+  };
+
+  const run = (): void => {
+    if (busy) return;
+    const u = api.cachedUser();
+    if (!api.isLoggedIn() || !u) {
+      navigate('#/login');
+      return;
+    }
+    const parts = currentParts();
+    if (!parts.length) {
+      statusEl.textContent = 'No parts to nest.';
+      return;
+    }
+    const instances = instanceCount(parts);
+    const cost = nestCost(instances, strategy);
+    if (u.credits < cost) {
+      statusEl.textContent = `Not enough credits — this nest costs ${cost}, you have ${u.credits}.`;
+      return;
+    }
+    busy = true;
+    runBtn.disabled = true;
+    runCtx = { instances, strategy, cost, parts };
+    statusEl.textContent = `Nesting ${instances} parts (${strategy})…`;
+    worker.postMessage({ parts, config: currentConfig() });
+  };
+
+  worker.onmessage = (e: MessageEvent<{ result?: NestResult; error?: string }>) => {
+    busy = false;
+    runBtn.disabled = false;
+    if (e.data.error) {
+      statusEl.textContent = `Error: ${e.data.error}`;
+      runCtx = null;
+      return;
+    }
+    const r = e.data.result;
+    if (!r) return;
+    // Pair the result with the parts it was computed from, then draw.
+    if (runCtx) lastParts = runCtx.parts;
+    render(r);
+    statusEl.textContent =
+      `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${r.iterations} layouts` +
+      (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : '');
+    updateCostLabel();
+    // Charge exactly once, via the API (which reprices server-side) — only a
+    // completed explicit nest reaches this path.
+    if (runCtx) {
+      const ctx = runCtx;
+      runCtx = null;
+      api
+        .completeNest({
+          parts: ctx.instances,
+          strategy: ctx.strategy,
+          sheets: r.sheetsUsed,
+          utilPct: Math.min(100, r.metrics.utilization * 100),
+        })
+        .then((res) => updateCreditsPill(res.credits))
+        .catch((err) => {
+          if (err instanceof api.ApiError && err.status === 401) {
+            navigate('#/login');
+          } else {
+            statusEl.textContent = `Charge failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        });
+    }
+  };
+  worker.onerror = (e) => {
+    busy = false;
+    runBtn.disabled = false;
+    runCtx = null;
+    statusEl.textContent = `Worker error: ${e.message}`;
+  };
+
+  // --- Import (SVG / DXF) ---
+  const isDxf = (text: string, name: string): boolean => {
+    if (/\.dxf$/i.test(name)) return true;
+    if (/\.svg$/i.test(name) || /<svg[\s>]/i.test(text)) return false;
+    return /\bENTITIES\b/.test(text) && /\bSECTION\b/.test(text);
+  };
+  const loadFile = (text: string, name: string): void => {
+    importedText = text;
+    importedName = name;
+    const scale = num('scale') || 1;
+    const { parts, warnings } = isDxf(text, name) ? importDxfParts(text, scale) : importSvgParts(text, scale);
+    if (!parts.length) {
+      importInfo.textContent = warnings[0] ?? 'No shapes found.';
+      importInfo.classList.add('warn');
+      return;
+    }
+    importedParts = parts;
+    mode = 'imported';
+    importInfo.classList.toggle('warn', warnings.length > 0);
+    importInfo.textContent = `Imported ${parts.length} shapes from ${isDxf(text, name) ? 'DXF' : 'SVG'}${
+      warnings.length ? ' · ' + warnings[0] : ''
+    }`;
+    updateCostLabel();
+    statusEl.textContent = 'Parts ready — press Nest layout.';
+  };
+
+  const fileInput = el<HTMLInputElement>('file');
+  el('browse').addEventListener('click', () => fileInput.click());
+  el('drop').addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).id !== 'browse') fileInput.click();
+  });
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files?.[0];
+    if (f) f.text().then((t) => loadFile(t, f.name));
+  });
+  const drop = el('drop');
+  ['dragenter', 'dragover'].forEach((ev) =>
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      drop.classList.add('over');
+    }),
+  );
+  ['dragleave', 'drop'].forEach((ev) =>
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      drop.classList.remove('over');
+    }),
+  );
+  drop.addEventListener('drop', (e) => {
+    const f = (e as DragEvent).dataTransfer?.files?.[0];
+    if (f) f.text().then((t) => loadFile(t, f.name));
+  });
+  el('scale').addEventListener('change', () => {
+    if (mode === 'imported' && importedText) loadFile(importedText, importedName);
+  });
+
+  // --- Text -> letters ---
+  const makeLetters = async (): Promise<void> => {
+    const text = el<HTMLInputElement>('text').value;
+    const h = Number(el<HTMLInputElement>('letterH').value) || 80;
+    importInfo.classList.remove('warn');
+    importInfo.textContent = 'Building letters…';
+    try {
+      const parts = await textToParts(text, h);
+      if (!parts.length) {
+        importInfo.textContent = 'No letters to cut (spaces only?).';
+        importInfo.classList.add('warn');
+        return;
+      }
+      importedParts = parts;
+      mode = 'imported';
+      importedText = null;
+      importedName = '';
+      importInfo.textContent = `Generated ${parts.length} letter pieces from “${text.trim()}”`;
+      updateCostLabel();
+      statusEl.textContent = 'Letters ready — press Nest layout.';
+    } catch (err) {
+      importInfo.textContent = `Could not build letters: ${err instanceof Error ? err.message : String(err)}`;
+      importInfo.classList.add('warn');
+    }
+  };
+  el('makeText').addEventListener('click', makeLetters);
+  el('text').addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter') makeLetters();
+  });
+
+  // --- Controls ---
+  document.querySelectorAll<HTMLButtonElement>('#strategy button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#strategy button').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      strategy = (btn.dataset.val as Strategy) ?? 'fast';
+      updateCostLabel();
+    });
+  });
+  el('sampleSet').addEventListener('change', () => {
+    mode = 'sample';
+    importInfo.classList.remove('warn');
+    importInfo.textContent = 'Using a built-in sample set.';
+    updateCostLabel();
+    statusEl.textContent = 'Ready — press Nest layout.';
+  });
+  runBtn.addEventListener('click', run);
+  exportSvgBtn.addEventListener('click', () => lastResult && exportSvg(lastResult, lastParts));
+  exportDxfBtn.addEventListener('click', () => lastResult && exportDxf(lastResult, lastParts));
+  el('showPath').addEventListener('change', () => {
+    if (lastResult) render(lastResult);
+  });
+
+  // Nav
+  root.querySelector('.js-home')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    navigate('#/');
+  });
+  root.querySelector('.js-logout')?.addEventListener('click', () => {
+    api.logout();
+    navigate('#/');
+  });
+
+  updateCostLabel();
+  statusEl.textContent = 'Press Nest layout to run the engine.';
+
+  // Refresh the balance from the server (kicks stale sessions back to login).
+  api
+    .me()
+    .then((fresh) => {
+      if (fresh) updateCreditsPill(fresh.credits);
+      else navigate('#/login');
+    })
+    .catch((err) => {
+      if (err instanceof api.ApiError && err.status === 401) navigate('#/login');
+      // Network failure: keep the cached view usable; charging will surface errors.
+    });
+
+  return () => worker.terminate();
+}
