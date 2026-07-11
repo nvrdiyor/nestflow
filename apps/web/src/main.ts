@@ -1,6 +1,7 @@
 import './app.css';
 import './style.css';
 import { isLoggedIn } from './api';
+import { getLang } from './i18n';
 import { renderLanding } from './views/landing';
 import { renderAuth } from './views/auth';
 import { renderApp } from './views/app';
@@ -49,5 +50,7 @@ function route(): void {
   }
 }
 
+document.documentElement.lang = getLang();
 window.addEventListener('hashchange', route);
+window.addEventListener('nf-langchange', route); // re-render current view in the new language
 route();

@@ -17,61 +17,65 @@ import { exportDxf, exportSvg } from '../exporters';
 import { appNavMarkup } from '../ui/nav';
 import * as api from '../api';
 import { nestCost } from '../cost';
+import { estimateSheet, fitToParts } from '../autofit';
+import { previewSvg } from '../preview';
+import { t, wireLangSwitch } from '../i18n';
 
 type Nav = (hash: string) => void;
 
-const TOOL_MARKUP = `
+const toolMarkup = (): string => `
 <div class="tool-view"><main class="layout">
   <aside class="panel">
     <section class="group">
-      <h2>Your parts</h2>
+      <h2>${t('app.yourParts')}</h2>
       <div id="drop" class="drop">
         <input id="file" type="file" accept=".svg,.dxf,image/svg+xml" hidden />
         <span class="drop-ic">⬆</span>
-        <span>Drop an <b>SVG</b> or <b>DXF</b> here, or <button type="button" id="browse" class="link">browse</button></span>
+        <span>${t('app.dropHere')} <button type="button" id="browse" class="link">${t('app.browse')}</button></span>
       </div>
-      <div class="row"><label class="field"><span>Scale (mm / unit)</span><input id="scale" type="number" value="1" min="0.01" step="0.1" /></label></div>
+      <div class="row"><label class="field"><span>${t('app.scale')}</span><input id="scale" type="number" value="1" min="0.01" step="0.1" /></label></div>
       <div class="textgen">
-        <label class="field"><span>…or type letters to cut</span><input id="text" type="text" value="ASSALOMU ALEYKUM" /></label>
+        <label class="field"><span>${t('app.typeLetters')}</span><input id="text" type="text" value="ASSALOMU ALEYKUM" /></label>
         <div class="row">
-          <label class="field"><span>Letter height (mm)</span><input id="letterH" type="number" value="80" min="5" step="5" /></label>
-          <button id="makeText" class="secondary">Make letters</button>
+          <label class="field"><span>${t('app.letterHeight')}</span><input id="letterH" type="number" value="80" min="5" step="5" /></label>
+          <button id="makeText" class="secondary">${t('app.makeLetters')}</button>
         </div>
       </div>
-      <p id="importInfo" class="hint">Using a built-in sample set.</p>
+      <p id="importInfo" class="hint">${t('app.usingSample')}</p>
     </section>
     <section class="group">
-      <h2>Sample set</h2>
-      <label class="field"><span>Or pick a demo</span>
+      <h2>${t('app.sampleSet')}</h2>
+      <label class="field"><span>${t('app.orPickDemo')}</span>
         <select id="sampleSet">
-          <option value="signshop">Sign shop (rings, triangles, brackets)</option>
-          <option value="letters">Letters &amp; rings (hole filling)</option>
+          <option value="signshop">Sign shop</option>
+          <option value="letters">Letters &amp; rings</option>
           <option value="rects">Rectangles &amp; bars</option>
-          <option value="dense">Dense mixed (stress test)</option>
+          <option value="dense">Dense mixed</option>
         </select>
       </label>
     </section>
     <section class="group">
-      <h2>Sheet (mm)</h2>
+      <h2>${t('app.sheet')}</h2>
+      <label class="check" style="margin-bottom:10px"><input id="fitSheet" type="checkbox" checked /> <span>${t('app.fitSheet')}</span></label>
       <div class="row">
-        <label class="field"><span>Width</span><input id="sheetW" type="number" value="800" min="50" step="10" /></label>
-        <label class="field"><span>Height</span><input id="sheetH" type="number" value="600" min="50" step="10" /></label>
+        <label class="field"><span>${t('app.width')}</span><input id="sheetW" type="number" value="800" min="50" step="10" /></label>
+        <label class="field"><span>${t('app.height')}</span><input id="sheetH" type="number" value="600" min="50" step="10" /></label>
       </div>
       <div class="row">
-        <label class="field"><span>Margin</span><input id="margin" type="number" value="5" min="0" step="1" /></label>
-        <label class="field"><span>Sheet $</span><input id="sheetCost" type="number" value="45" min="0" step="1" /></label>
+        <label class="field"><span>${t('app.margin')}</span><input id="margin" type="number" value="5" min="0" step="1" /></label>
+        <label class="field"><span>${t('app.sheetCost')}</span><input id="sheetCost" type="number" value="45" min="0" step="1" /></label>
       </div>
     </section>
     <section class="group">
-      <h2>Cutting</h2>
+      <h2>${t('app.cutting')}</h2>
       <div class="row">
-        <label class="field"><span>Spacing</span><input id="spacing" type="number" value="3" min="0" step="0.5" /></label>
-        <label class="field"><span>Kerf</span><input id="kerf" type="number" value="0.2" min="0" step="0.1" /></label>
+        <label class="field"><span>${t('app.spacing')}</span><input id="spacing" type="number" value="3" min="0" step="0.5" /></label>
+        <label class="field"><span>${t('app.kerf')}</span><input id="kerf" type="number" value="0.2" min="0" step="0.1" /></label>
       </div>
-      <label class="check"><input id="holeFilling" type="checkbox" checked /> <span>Fill holes with small parts</span></label>
+      <label class="check"><input id="holeFilling" type="checkbox" checked /> <span>${t('app.fillHoles')}</span></label>
     </section>
     <section class="group">
-      <h2>Rotations</h2>
+      <h2>${t('app.rotations')}</h2>
       <div class="chips">
         <label class="chip"><input type="checkbox" class="rot" value="0" checked />0°</label>
         <label class="chip"><input type="checkbox" class="rot" value="90" checked />90°</label>
@@ -80,27 +84,27 @@ const TOOL_MARKUP = `
       </div>
     </section>
     <section class="group">
-      <h2>Optimization</h2>
+      <h2>${t('app.optimization')}</h2>
       <div class="segmented" id="strategy">
-        <button data-val="fast" class="active">Fast</button>
-        <button data-val="balanced">Balanced</button>
-        <button data-val="max">Max saving</button>
+        <button data-val="fast" class="active">${t('app.fast')}</button>
+        <button data-val="balanced">${t('app.balanced')}</button>
+        <button data-val="max">${t('app.maxSaving')}</button>
       </div>
-      <label class="check" style="margin-top:12px"><input id="showPath" type="checkbox" /> <span>Show cut path &amp; <span style="color:#f97316">common lines</span></span></label>
+      <label class="check" style="margin-top:12px"><input id="showPath" type="checkbox" /> <span>${t('app.showPath')}</span></label>
     </section>
-    <button id="run" class="primary">Nest layout</button>
-    <p id="status" class="status">Ready.</p>
+    <button id="run" class="primary">${t('app.nestLayout')}</button>
+    <p id="status" class="status"></p>
     <section class="group">
-      <h2>Export</h2>
+      <h2>${t('app.export')}</h2>
       <div class="exports">
-        <button id="exportSvg" class="secondary" disabled>Download SVG</button>
-        <button id="exportDxf" class="secondary" disabled>Download DXF</button>
+        <button id="exportSvg" class="secondary" disabled>${t('app.downloadSvg')}</button>
+        <button id="exportDxf" class="secondary" disabled>${t('app.downloadDxf')}</button>
       </div>
     </section>
   </aside>
   <section class="stage">
     <div class="metrics" id="metrics"></div>
-    <div class="viewport" id="viewport"><div class="placeholder">Press <b>Nest layout</b> to run the engine.</div></div>
+    <div class="viewport" id="viewport"></div>
   </section>
 </main></div>`;
 
@@ -110,7 +114,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     navigate('#/login');
     return () => {};
   }
-  root.innerHTML = appNavMarkup(user) + TOOL_MARKUP;
+  root.innerHTML = appNavMarkup(user) + toolMarkup();
 
   const worker = new Worker(new URL('../nest.worker.ts', import.meta.url), { type: 'module' });
   const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -144,11 +148,18 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   const instanceCount = (parts: Part[]): number => parts.reduce((s, p) => s + (p.quantity ?? 1), 0);
 
+  const fitEnabled = (): boolean => checked('fitSheet');
+
   const currentConfig = (): NestConfig => {
     const rotations = Array.from(document.querySelectorAll<HTMLInputElement>('.rot:checked')).map((r) => Number(r.value));
     const timeLimitMs = strategy === 'max' ? 8000 : strategy === 'balanced' ? 4000 : undefined;
+    // In fit-to-parts mode the packer runs on a generous auto-sized sheet so it
+    // clusters everything on one sheet; the result is then cropped to the pack.
+    const sheet = fitEnabled()
+      ? { ...estimateSheet(currentParts()), margin: num('margin'), cost: num('sheetCost') }
+      : { width: num('sheetW'), height: num('sheetH'), margin: num('margin'), cost: num('sheetCost') };
     const config: NestConfig = {
-      sheet: { width: num('sheetW'), height: num('sheetH'), margin: num('margin'), cost: num('sheetCost') },
+      sheet,
       units: 'mm',
       rotations: rotations.length ? rotations : [0],
       spacing: num('spacing'),
@@ -164,7 +175,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   const updateCostLabel = (): void => {
     const cost = nestCost(instanceCount(currentParts()), strategy);
-    runBtn.textContent = `Nest layout · ${cost} credit${cost === 1 ? '' : 's'}`;
+    runBtn.textContent = `${t('app.nestLayout')} · ${cost} ${t('nav.credits')}`;
   };
 
   const updateCreditsPill = (credits: number): void => {
@@ -172,6 +183,25 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       creditsEl.textContent = String(credits);
       creditsEl.parentElement?.classList.toggle('low', credits <= 10);
     }
+  };
+
+  // Instant, free preview of the current parts (before a real nest is run).
+  const showPreview = (label: string): void => {
+    const parts = currentParts();
+    viewport.innerHTML = parts.length
+      ? previewSvg(parts)
+      : '<div class="placeholder">No parts yet.</div>';
+    exportSvgBtn.disabled = true;
+    exportDxfBtn.disabled = true;
+    lastResult = null;
+    statusEl.textContent = label;
+  };
+
+  // Sheet W/H are auto-computed in fit mode, so grey the inputs out.
+  const syncSheetInputs = (): void => {
+    const disabled = fitEnabled();
+    el<HTMLInputElement>('sheetW').disabled = disabled;
+    el<HTMLInputElement>('sheetH').disabled = disabled;
   };
 
   const metricCard = (label: string, value: string, good = false): string =>
@@ -183,13 +213,13 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     const mins = Math.floor(cutSec / 60);
     const secs = Math.round(cutSec % 60);
     metricsEl.innerHTML = [
-      metricCard('Sheets used', `${r.sheetsUsed} <small>/ naive ${m.baselineSheets}</small>`),
-      metricCard('Utilization', `${(m.utilization * 100).toFixed(1)}<small>%</small>`),
-      metricCard('Saved', `$${m.savedMoney.toFixed(0)}`, m.savedMoney > 0),
-      metricCard('Cut length', `${(cm.effectiveCutLength / 1000).toFixed(2)}<small>m</small>`),
-      metricCard('Common-line saved', `${(cm.savedLength / 1000).toFixed(2)}<small>m</small>`, cm.savedLength > 0),
-      metricCard('Cut time', `${mins}<small>m</small> ${secs}<small>s</small>`),
-      metricCard('Unplaced', String(r.unplaced.length), r.unplaced.length === 0),
+      metricCard(t('app.mSheets'), `${r.sheetsUsed} <small>/ ${t('app.naive')} ${m.baselineSheets}</small>`),
+      metricCard(t('app.mUtil'), `${(m.utilization * 100).toFixed(1)}<small>%</small>`),
+      metricCard(t('app.mSaved'), `$${m.savedMoney.toFixed(0)}`, m.savedMoney > 0),
+      metricCard(t('app.mCutLen'), `${(cm.effectiveCutLength / 1000).toFixed(2)}<small>m</small>`),
+      metricCard(t('app.mCommon'), `${(cm.savedLength / 1000).toFixed(2)}<small>m</small>`, cm.savedLength > 0),
+      metricCard(t('app.mCutTime'), `${mins}<small>m</small> ${secs}<small>s</small>`),
+      metricCard(t('app.mUnplaced'), String(r.unplaced.length), r.unplaced.length === 0),
     ].join('');
   };
 
@@ -220,13 +250,13 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     const instances = instanceCount(parts);
     const cost = nestCost(instances, strategy);
     if (u.credits < cost) {
-      statusEl.textContent = `Not enough credits — this nest costs ${cost}, you have ${u.credits}.`;
+      statusEl.textContent = t('app.notEnough', { cost, have: u.credits });
       return;
     }
     busy = true;
     runBtn.disabled = true;
     runCtx = { instances, strategy, cost, parts };
-    statusEl.textContent = `Nesting ${instances} parts (${strategy})…`;
+    statusEl.textContent = t('app.nesting', { n: instances, s: strategy });
     worker.postMessage({ parts, config: currentConfig() });
   };
 
@@ -268,16 +298,15 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
           navigate('#/login');
           return;
         }
-        statusEl.textContent =
-          err instanceof api.ApiError
-            ? `Nest not delivered: ${err.message}`
-            : 'Could not charge for this nest, so the result was discarded — check your connection and try again.';
+        statusEl.textContent = err instanceof api.ApiError ? err.message : t('app.chargeFail');
         return; // result intentionally not rendered or exportable
       }
     }
     busy = false;
     runBtn.disabled = false;
-    render(r);
+    // Crop the sheet to the packed parts for a clean, full layout (auto-size).
+    const out = fitEnabled() ? fitToParts(r, lastParts, num('margin')) : r;
+    render(out);
     statusEl.textContent =
       `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${r.iterations} layouts` +
       (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : '');
@@ -313,7 +342,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       warnings.length ? ' · ' + warnings[0] : ''
     }`;
     updateCostLabel();
-    statusEl.textContent = 'Parts ready — press Nest layout.';
+    showPreview(t('app.partsReady'));
   };
 
   const fileInput = el<HTMLInputElement>('file');
@@ -351,7 +380,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     const text = el<HTMLInputElement>('text').value;
     const h = Number(el<HTMLInputElement>('letterH').value) || 80;
     importInfo.classList.remove('warn');
-    importInfo.textContent = 'Building letters…';
+    importInfo.textContent = t('app.building');
     try {
       const parts = await textToParts(text, h);
       if (!parts.length) {
@@ -365,7 +394,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       importedName = '';
       importInfo.textContent = `Generated ${parts.length} letter pieces from “${text.trim()}”`;
       updateCostLabel();
-      statusEl.textContent = 'Letters ready — press Nest layout.';
+      showPreview(t('app.lettersReady', { n: parts.length }));
     } catch (err) {
       importInfo.textContent = `Could not build letters: ${err instanceof Error ? err.message : String(err)}`;
       importInfo.classList.add('warn');
@@ -388,9 +417,13 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   el('sampleSet').addEventListener('change', () => {
     mode = 'sample';
     importInfo.classList.remove('warn');
-    importInfo.textContent = 'Using a built-in sample set.';
+    importInfo.textContent = t('app.usingSample');
     updateCostLabel();
-    statusEl.textContent = 'Ready — press Nest layout.';
+    showPreview(t('app.ready'));
+  });
+  el('fitSheet').addEventListener('change', () => {
+    syncSheetInputs();
+    updateCostLabel();
   });
   runBtn.addEventListener('click', run);
   exportSvgBtn.addEventListener('click', () => lastResult && exportSvg(lastResult, lastParts));
@@ -408,9 +441,11 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     api.logout();
     navigate('#/');
   });
+  wireLangSwitch(root);
 
   updateCostLabel();
-  statusEl.textContent = 'Press Nest layout to run the engine.';
+  syncSheetInputs();
+  showPreview(t('app.previewHint'));
 
   // Refresh the balance from the server (kicks stale sessions back to login).
   api

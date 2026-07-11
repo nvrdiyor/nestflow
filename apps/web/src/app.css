@@ -175,6 +175,11 @@ table.data tr:last-child td { border-bottom: 0; }
 table.data tr:hover td { background: rgba(255,255,255,.02); }
 .empty { padding: 40px; text-align: center; color: var(--faint); font-size: 14px; }
 
+.lang-switch { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; }
+.lang-switch button { background: transparent; border: 0; color: var(--muted); padding: 6px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.lang-switch button.active { background: var(--accent-2); color: #fff; }
+.lang-switch button:hover:not(.active) { color: var(--text); }
+
 .hidden { display: none !important; }
 @media (max-width: 720px) {
   .nav { padding: 0 16px; }

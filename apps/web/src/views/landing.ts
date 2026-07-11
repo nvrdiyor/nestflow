@@ -1,10 +1,11 @@
 import { isLoggedIn } from '../api';
 import { STARTING_CREDITS } from '../cost';
+import { langSwitchMarkup, t, wireLangSwitch } from '../i18n';
 
 type Nav = (hash: string) => void;
 
 const HERO_SVG = `
-<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Illustration of parts nested tightly on a cutting sheet">
+<svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Parts nested on a cutting sheet">
   <rect x="0" y="0" width="900" height="300" fill="#0e1220"/>
   <rect x="24" y="24" width="852" height="252" fill="#11151f" stroke="#2c344a" stroke-width="2"/>
   <path d="M60 70 a60 60 0 1 0 0.1 0 Z M120 130 a30 30 0 1 1 -0.1 0 Z" fill="#2563eb" fill-opacity="0.85" fill-rule="evenodd"/>
@@ -24,28 +25,30 @@ const HERO_SVG = `
 </svg>`;
 
 export function renderLanding(root: HTMLElement, navigate: Nav): void {
-  const user = isLoggedIn();
-  const primaryCta = user
-    ? `<button class="btn btn-primary btn-lg js-app">Open the app →</button>`
-    : `<button class="btn btn-primary btn-lg js-start">Get started free →</button>`;
+  const loggedIn = isLoggedIn();
+  const primaryCta = loggedIn
+    ? `<button class="btn btn-primary btn-lg js-app">${t('landing.openAppArrow')}</button>`
+    : `<button class="btn btn-primary btn-lg js-start">${t('landing.getStarted')}</button>`;
+  const feat = (i: number, ic: string) =>
+    `<div class="feature"><div class="ic">${ic}</div><h3>${t(`landing.f${i}t`)}</h3><p>${t(`landing.f${i}d`)}</p></div>`;
+  const step = (i: number) =>
+    `<div class="step"><div class="num">${i}</div><h4>${t(`landing.s${i}t`)}</h4><p>${t(`landing.s${i}d`)}</p></div>`;
 
   root.innerHTML = `
   <header class="container landing-nav">
-    <a class="brand js-home" href="#/"><span class="logo">◧</span><div>NestFlow&nbsp;AI<small>NESTING PLATFORM</small></div></a>
+    <a class="brand js-home" href="#/"><span class="logo">◧</span><div>NestFlow&nbsp;AI<small>${t('brand.tag')}</small></div></a>
     <div style="display:flex;gap:10px;align-items:center">
-      ${user ? `<button class="btn btn-ghost js-app">Open app</button>` : `<button class="btn btn-ghost js-login">Log in</button><button class="btn btn-primary js-start">Sign up</button>`}
+      ${langSwitchMarkup()}
+      ${loggedIn ? `<button class="btn btn-ghost js-app">${t('landing.openApp')}</button>` : `<button class="btn btn-ghost js-login">${t('landing.login')}</button><button class="btn btn-primary js-start">${t('landing.signup')}</button>`}
     </div>
   </header>
 
   <section class="hero">
     <div class="container">
-      <span class="eyebrow">CNC · Laser · Plotter</span>
-      <h1>Cut more parts from <span class="grad">less material</span>.</h1>
-      <p class="lead">NestFlow arranges your letters, logos and parts on the sheet automatically — packing them as tightly as possible so you save material, time and money on every cut.</p>
-      <div class="hero-cta">
-        ${primaryCta}
-        <a class="btn btn-lg js-how" href="#how">How it works</a>
-      </div>
+      <span class="eyebrow">${t('landing.eyebrowTop')}</span>
+      <h1>${t('landing.heroTitle')}</h1>
+      <p class="lead">${t('landing.heroLead')}</p>
+      <div class="hero-cta">${primaryCta}<a class="btn btn-lg js-how" href="#how">${t('landing.howItWorks')}</a></div>
       <div class="hero-figure">${HERO_SVG}</div>
     </div>
   </section>
@@ -53,42 +56,32 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
   <section class="section" id="features">
     <div class="container">
       <div class="section-head">
-        <span class="eyebrow">Features</span>
-        <h2>Built for real cutting shops</h2>
-        <p>Everything you need to turn a design into an optimised, machine-ready cut.</p>
+        <span class="eyebrow">${t('landing.featuresEyebrow')}</span>
+        <h2>${t('landing.featuresTitle')}</h2>
+        <p>${t('landing.featuresSub')}</p>
       </div>
       <div class="grid-3">
-        <div class="feature"><div class="ic">🔤</div><h3>Cut letters &amp; text</h3><p>Type a word and NestFlow turns each letter into a vector part — counters (A, O, e) cut out — then packs them tightly.</p></div>
-        <div class="feature"><div class="ic">📥</div><h3>Import SVG &amp; DXF</h3><p>Drop your files. Curves, arcs and bulges are flattened, holes detected, and loose lines chained into closed parts.</p></div>
-        <div class="feature"><div class="ic">🧩</div><h3>True irregular nesting</h3><p>No-Fit-Polygon engine with genetic-algorithm search fits parts into every gap — even inside the holes of other parts.</p></div>
-        <div class="feature"><div class="ic">✂️</div><h3>Common-line cutting</h3><p>Shared edges between parts are cut once, not twice — less cutting, shorter machine time, less waste.</p></div>
-        <div class="feature"><div class="ic">📐</div><h3>Multi-sheet &amp; rotation</h3><p>Parts overflow to new sheets automatically and rotate to fit. Set spacing, kerf and margins to match your machine.</p></div>
-        <div class="feature"><div class="ic">📤</div><h3>Export to machine</h3><p>Download the nested layout as SVG or DXF in millimetres — ready for your laser, router or plotter.</p></div>
+        ${feat(1, '🔤')}${feat(2, '📥')}${feat(3, '🧩')}${feat(4, '✂️')}${feat(5, '📐')}${feat(6, '📤')}
       </div>
     </div>
   </section>
 
   <section class="section" id="how" style="background:var(--bg-2);border-block:1px solid var(--line)">
     <div class="container">
-      <div class="section-head"><span class="eyebrow">How it works</span><h2>From word to cut in four steps</h2></div>
-      <div class="steps">
-        <div class="step"><div class="num">1</div><h4>Add your parts</h4><p>Type letters, or upload an SVG/DXF file.</p></div>
-        <div class="step"><div class="num">2</div><h4>Set the sheet</h4><p>Material size, spacing, kerf and rotations.</p></div>
-        <div class="step"><div class="num">3</div><h4>Nest</h4><p>The engine packs everything in seconds.</p></div>
-        <div class="step"><div class="num">4</div><h4>Export</h4><p>Download a machine-ready DXF or SVG.</p></div>
-      </div>
+      <div class="section-head"><span class="eyebrow">${t('landing.howEyebrow')}</span><h2>${t('landing.howTitle')}</h2></div>
+      <div class="steps">${step(1)}${step(2)}${step(3)}${step(4)}</div>
     </div>
   </section>
 
   <section class="section" id="credits">
     <div class="container">
-      <div class="section-head"><span class="eyebrow">Credits</span><h2>Simple, transparent pricing</h2><p>Every new account starts with <b>${STARTING_CREDITS} free credits</b>. Each nest costs credits based on job size and how hard the engine searches.</p></div>
+      <div class="section-head"><span class="eyebrow">${t('landing.creditsEyebrow')}</span><h2>${t('landing.creditsTitle')}</h2><p>${t('landing.creditsSub', { n: STARTING_CREDITS })}</p></div>
       <div class="credits-box">
-        <div class="credits-formula">cost = strategyBase + ⌈ parts ÷ 15 ⌉&nbsp;&nbsp;&nbsp;(Fast = 1, Balanced = 3, Max saving = 6)</div>
+        <div class="credits-formula">cost = strategyBase + ⌈ parts ÷ 15 ⌉&nbsp;&nbsp;&nbsp;(Fast = 1, Balanced = 3, Max = 6)</div>
         <div class="credit-examples">
-          <div class="credit-ex"><div class="n">2<small> cr</small></div><div class="d">10 parts · Fast</div></div>
-          <div class="credit-ex"><div class="n">7<small> cr</small></div><div class="d">47 parts · Balanced</div></div>
-          <div class="credit-ex"><div class="n">13<small> cr</small></div><div class="d">100 parts · Max saving</div></div>
+          <div class="credit-ex"><div class="n">2<small> cr</small></div><div class="d">${t('landing.creditsEx1')}</div></div>
+          <div class="credit-ex"><div class="n">7<small> cr</small></div><div class="d">${t('landing.creditsEx2')}</div></div>
+          <div class="credit-ex"><div class="n">13<small> cr</small></div><div class="d">${t('landing.creditsEx3')}</div></div>
         </div>
       </div>
       <div style="text-align:center;margin-top:32px">${primaryCta}</div>
@@ -97,8 +90,8 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
 
   <footer class="footer">
     <div class="container">
-      <span>NestFlow AI — intelligent nesting for CNC / laser / plotter.</span>
-      <span>Demo build · data stored in your browser</span>
+      <span>${t('landing.footer')}</span>
+      <span>${t('landing.footerNote')}</span>
     </div>
   </footer>`;
 
@@ -114,4 +107,5 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
     e.preventDefault();
     document.getElementById('how')?.scrollIntoView({ behavior: 'smooth' });
   });
+  wireLangSwitch(root);
 }

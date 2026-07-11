@@ -1,5 +1,6 @@
 import * as api from '../api';
 import { adminNavMarkup, escapeHtml } from '../ui/nav';
+import { langSwitchMarkup, t, wireLangSwitch } from '../i18n';
 
 type Nav = (hash: string) => void;
 
@@ -14,20 +15,22 @@ function fmtDate(ts: number): string {
 function renderLogin(root: HTMLElement, navigate: Nav): void {
   root.innerHTML = `
   <div class="auth-wrap">
-    <span class="auth-back js-home">← Back to home</span>
+    <span class="auth-back js-home">${t('nav.back')}</span>
+    <div style="position:absolute;top:18px;right:20px">${langSwitchMarkup()}</div>
     <div class="auth-card">
       <div class="brand"><span class="logo">◧</span><div>NestFlow&nbsp;AI</div></div>
-      <h1>Admin sign in</h1>
-      <p class="sub">Restricted area.</p>
+      <h1>${t('auth.adminTitle')}</h1>
+      <p class="sub">${t('auth.adminSub')}</p>
       <div class="auth-error hidden js-error"></div>
       <form class="js-form">
-        <div class="form-row"><label class="field-label">Username</label><input class="input js-user" type="text" autocomplete="username" placeholder="admin" /></div>
-        <div class="form-row"><label class="field-label">Password</label><input class="input js-pass" type="password" autocomplete="current-password" placeholder="••••••••" /></div>
-        <button class="btn btn-primary js-submit" type="submit" style="width:100%;margin-top:6px">Enter dashboard</button>
+        <div class="form-row"><label class="field-label">${t('auth.username')}</label><input class="input js-user" type="text" autocomplete="username" placeholder="admin" /></div>
+        <div class="form-row"><label class="field-label">${t('auth.password')}</label><input class="input js-pass" type="password" autocomplete="current-password" placeholder="••••••••" /></div>
+        <button class="btn btn-primary js-submit" type="submit" style="width:100%;margin-top:6px">${t('auth.enterDashboard')}</button>
       </form>
     </div>
   </div>`;
   root.querySelector('.js-home')?.addEventListener('click', () => navigate('#/'));
+  wireLangSwitch(root);
   const errorEl = root.querySelector<HTMLElement>('.js-error')!;
   root.querySelector<HTMLFormElement>('.js-form')!.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -45,7 +48,8 @@ function renderLogin(root: HTMLElement, navigate: Nav): void {
 }
 
 async function renderDashboard(root: HTMLElement, navigate: Nav): Promise<void> {
-  root.innerHTML = `${adminNavMarkup()}<div class="container page"><div class="empty">Loading dashboard…</div></div>`;
+  root.innerHTML = `${adminNavMarkup()}<div class="container page"><div class="empty">${t('admin.loading')}</div></div>`;
+  wireNav(root, navigate);
   let data: api.AdminOverview;
   try {
     data = await api.adminOverview();
@@ -54,8 +58,7 @@ async function renderDashboard(root: HTMLElement, navigate: Nav): Promise<void> 
       renderLogin(root, navigate);
       return;
     }
-    root.querySelector('.empty')!.textContent = 'Could not load the dashboard. Is the API running?';
-    wireNav(root, navigate);
+    root.querySelector('.empty')!.textContent = t('admin.loadFail');
     return;
   }
 
@@ -69,11 +72,11 @@ async function renderDashboard(root: HTMLElement, navigate: Nav): Promise<void> 
       <td>${u.nests}</td>
       <td style="color:var(--muted)">${fmtDate(u.createdAt)}</td>
       <td style="color:var(--muted)">${fmtDate(u.lastActive)}</td>
-      <td><button class="btn btn-ghost js-grant" data-id="${u.id}" title="Grant 50 credits">+50</button></td>
+      <td><button class="btn btn-ghost js-grant" data-id="${u.id}" title="+50">+50</button></td>
     </tr>`,
         )
         .join('')
-    : `<tr><td colspan="7"><div class="empty">No users yet. Sign up from the app to see them here.</div></td></tr>`;
+    : `<tr><td colspan="7"><div class="empty">${t('admin.noUsers')}</div></td></tr>`;
 
   const activityRows = data.usage.length
     ? data.usage
@@ -81,37 +84,37 @@ async function renderDashboard(root: HTMLElement, navigate: Nav): Promise<void> 
           (e) => `<tr>
         <td style="color:var(--muted)">${fmtDate(e.at)}</td>
         <td>${escapeHtml(e.email)}</td>
-        <td>${e.parts} parts</td>
+        <td>${t('admin.parts', { n: e.parts })}</td>
         <td style="text-transform:capitalize">${escapeHtml(e.strategy)}</td>
-        <td>${e.sheets} sheet${e.sheets === 1 ? '' : 's'}</td>
+        <td>${t('admin.sheetsN', { n: e.sheets })}</td>
         <td>${e.utilPct.toFixed(1)}%</td>
         <td><b style="color:var(--warn)">−${e.cost}</b></td>
       </tr>`,
         )
         .join('')
-    : `<tr><td colspan="7"><div class="empty">No nests run yet.</div></td></tr>`;
+    : `<tr><td colspan="7"><div class="empty">${t('admin.noNests')}</div></td></tr>`;
 
   root.innerHTML = `
   ${adminNavMarkup()}
   <div class="container page">
-    <div class="page-head"><h1>Admin dashboard</h1><p>Users, credit usage and activity across NestFlow.</p></div>
+    <div class="page-head"><h1>${t('admin.title')}</h1><p>${t('admin.sub')}</p></div>
 
     <div class="stat-grid">
-      <div class="stat"><div class="k">Users</div><div class="v">${data.stats.users}</div></div>
-      <div class="stat"><div class="k">Active today</div><div class="v accent">${data.stats.activeToday}</div></div>
-      <div class="stat"><div class="k">Nests run</div><div class="v">${data.stats.nests}</div></div>
-      <div class="stat"><div class="k">Credits used</div><div class="v accent">${data.stats.creditsUsed}</div></div>
+      <div class="stat"><div class="k">${t('admin.stUsers')}</div><div class="v">${data.stats.users}</div></div>
+      <div class="stat"><div class="k">${t('admin.stActive')}</div><div class="v accent">${data.stats.activeToday}</div></div>
+      <div class="stat"><div class="k">${t('admin.stNests')}</div><div class="v">${data.stats.nests}</div></div>
+      <div class="stat"><div class="k">${t('admin.stCredits')}</div><div class="v accent">${data.stats.creditsUsed}</div></div>
     </div>
 
-    <h2 style="font-size:16px;margin:6px 0 12px">Users &amp; credits</h2>
+    <h2 style="font-size:16px;margin:6px 0 12px">${t('admin.usersTitle')}</h2>
     <div class="table-wrap"><div class="table-scroll"><table class="data">
-      <thead><tr><th>Name</th><th>Email</th><th>Credits</th><th>Nests</th><th>Joined</th><th>Last active</th><th></th></tr></thead>
+      <thead><tr><th>${t('admin.thName')}</th><th>${t('admin.thEmail')}</th><th>${t('admin.thCredits')}</th><th>${t('admin.thNests')}</th><th>${t('admin.thJoined')}</th><th>${t('admin.thLast')}</th><th></th></tr></thead>
       <tbody>${usersRows}</tbody>
     </table></div></div>
 
-    <h2 style="font-size:16px;margin:26px 0 12px">Recent activity</h2>
+    <h2 style="font-size:16px;margin:26px 0 12px">${t('admin.activityTitle')}</h2>
     <div class="table-wrap"><div class="table-scroll"><table class="data">
-      <thead><tr><th>When</th><th>User</th><th>Job</th><th>Strategy</th><th>Sheets</th><th>Utilization</th><th>Credits</th></tr></thead>
+      <thead><tr><th>${t('admin.thWhen')}</th><th>${t('admin.thUser')}</th><th>${t('admin.thJob')}</th><th>${t('admin.thStrategy')}</th><th>${t('admin.thSheets')}</th><th>${t('admin.thUtil')}</th><th>${t('admin.thCredits')}</th></tr></thead>
       <tbody>${activityRows}</tbody>
     </table></div></div>
   </div>`;
@@ -139,6 +142,7 @@ function wireNav(root: HTMLElement, navigate: Nav): void {
     api.adminLogout();
     navigate('#/');
   });
+  wireLangSwitch(root);
 }
 
 export function renderAdmin(root: HTMLElement, navigate: Nav): void {
