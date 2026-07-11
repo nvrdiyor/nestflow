@@ -44,9 +44,23 @@ function jwtSecret(): string {
   return secret;
 }
 
+/**
+ * TRUST_PROXY: "false" (default — app exposed directly), "1"/"2"… (hop count
+ * when behind that many reverse proxies), or a proxy IP/CIDR. Never "true" in
+ * production unless every hop is trusted; spoofed X-Forwarded-For otherwise
+ * defeats rate limiting.
+ */
+function parseTrustProxy(raw: string | undefined): boolean | number | string {
+  if (!raw || raw === 'false') return false;
+  if (raw === 'true') return true;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : raw;
+}
+
 export const env = {
   port: Number(process.env.PORT) || 8787,
   host: process.env.HOST || '0.0.0.0',
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   jwtSecret: jwtSecret(),
   dbFile: process.env.DB_FILE || join(DATA_DIR, 'nestflow.db'),
   /** Admin credentials — override in production via env / .env. */

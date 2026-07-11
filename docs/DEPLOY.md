@@ -15,6 +15,7 @@ State is a single SQLite file — no external database to provision.
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | **Yes — change them** | Admin panel login. Defaults are development-only. |
 | `JWT_SECRET` | Recommended | Long random string. Auto-generated into `data/jwt-secret` if unset (fine for a single instance). |
 | `PORT` / `HOST` | No | Default `8787` / `0.0.0.0`. |
+| `TRUST_PROXY` | **Yes if behind a proxy** | `false` (default) when exposed directly. Behind Caddy/nginx/a PaaS router set the hop count (usually `1`). Wrong values let attackers spoof their IP and bypass login rate limits. |
 | `DATA_DIR` | No | Where the SQLite DB lives. **Must be persistent storage.** |
 | `CORS_ORIGIN` | No | Set to your domain if you ever host the frontend separately. |
 | `STARTING_CREDITS` | No | Free credits per new account (default 100). |
@@ -34,7 +35,7 @@ docker compose up -d --build
 
 # Or with a domain + free automatic HTTPS:
 #   point your domain's A record to the server IP, then in .env set
-#   DOMAIN=your-domain.com and HTTP_PORT=127.0.0.1:8787
+#   DOMAIN=your-domain.com, HTTP_PORT=127.0.0.1:8787 and TRUST_PROXY=1
 docker compose --profile https up -d --build
 ```
 

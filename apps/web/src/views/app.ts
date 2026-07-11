@@ -230,44 +230,58 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     worker.postMessage({ parts, config: currentConfig() });
   };
 
-  worker.onmessage = (e: MessageEvent<{ result?: NestResult; error?: string }>) => {
-    busy = false;
-    runBtn.disabled = false;
+  worker.onmessage = async (e: MessageEvent<{ result?: NestResult; error?: string }>) => {
     if (e.data.error) {
-      statusEl.textContent = `Error: ${e.data.error}`;
+      busy = false;
+      runBtn.disabled = false;
       runCtx = null;
+      statusEl.textContent = `Error: ${e.data.error}`;
       return;
     }
     const r = e.data.result;
-    if (!r) return;
-    // Pair the result with the parts it was computed from, then draw.
-    if (runCtx) lastParts = runCtx.parts;
+    if (!r) {
+      busy = false;
+      runBtn.disabled = false;
+      return;
+    }
+    // Charge FIRST (the server reprices) — the paid deliverable (layout render
+    // + enabled exports) only appears once the charge succeeds, so blocking or
+    // failing /api/nest/complete cannot yield a free, exportable nest. `busy`
+    // stays true through the await so a second run can't start mid-charge.
+    if (runCtx) {
+      const ctx = runCtx;
+      runCtx = null;
+      try {
+        const res = await api.completeNest({
+          parts: ctx.instances,
+          strategy: ctx.strategy,
+          sheets: r.sheetsUsed,
+          utilPct: Math.min(100, r.metrics.utilization * 100),
+        });
+        updateCreditsPill(res.credits);
+        lastParts = ctx.parts;
+      } catch (err) {
+        busy = false;
+        runBtn.disabled = false;
+        updateCostLabel();
+        if (err instanceof api.ApiError && err.status === 401) {
+          navigate('#/login');
+          return;
+        }
+        statusEl.textContent =
+          err instanceof api.ApiError
+            ? `Nest not delivered: ${err.message}`
+            : 'Could not charge for this nest, so the result was discarded — check your connection and try again.';
+        return; // result intentionally not rendered or exportable
+      }
+    }
+    busy = false;
+    runBtn.disabled = false;
     render(r);
     statusEl.textContent =
       `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${r.iterations} layouts` +
       (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : '');
     updateCostLabel();
-    // Charge exactly once, via the API (which reprices server-side) — only a
-    // completed explicit nest reaches this path.
-    if (runCtx) {
-      const ctx = runCtx;
-      runCtx = null;
-      api
-        .completeNest({
-          parts: ctx.instances,
-          strategy: ctx.strategy,
-          sheets: r.sheetsUsed,
-          utilPct: Math.min(100, r.metrics.utilization * 100),
-        })
-        .then((res) => updateCreditsPill(res.credits))
-        .catch((err) => {
-          if (err instanceof api.ApiError && err.status === 401) {
-            navigate('#/login');
-          } else {
-            statusEl.textContent = `Charge failed: ${err instanceof Error ? err.message : String(err)}`;
-          }
-        });
-    }
   };
   worker.onerror = (e) => {
     busy = false;

@@ -19,6 +19,14 @@ export interface ServerOptions {
   corsOrigin?: boolean | string;
   startingCredits?: number;
   logger?: boolean;
+  /**
+   * Proxy trust for client-IP resolution (rate-limit buckets key on req.ip).
+   * MUST stay false when the app is exposed directly — `true`/too-generous
+   * values let clients spoof X-Forwarded-For and rotate around rate limits
+   * (unlimited login brute-force). Behind a reverse proxy, set the hop count
+   * (e.g. 1 for Caddy/nginx in front) or the proxy's IP/CIDR.
+   */
+  trustProxy?: boolean | number | string;
 }
 
 interface TokenPayload {
@@ -67,7 +75,7 @@ const adjustSchema = z.object({
 
 export async function buildServer(opts: ServerOptions): Promise<FastifyInstance> {
   const db = new Db(opts.dbFile);
-  const app = Fastify({ logger: opts.logger ?? false, trustProxy: true });
+  const app = Fastify({ logger: opts.logger ?? false, trustProxy: opts.trustProxy ?? false });
 
   await app.register(cors, { origin: opts.corsOrigin ?? true });
   await app.register(jwt, { secret: opts.jwtSecret });

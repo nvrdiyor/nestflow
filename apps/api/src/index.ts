@@ -3,6 +3,7 @@ import { buildServer } from './server.js';
 
 const app = await buildServer({
   dbFile: env.dbFile,
+  trustProxy: env.trustProxy,
   jwtSecret: env.jwtSecret,
   adminUsername: env.adminUsername,
   adminPassword: env.adminPassword,

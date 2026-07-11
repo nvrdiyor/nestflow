@@ -18,6 +18,9 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
       JWT_SECRET: ${JWT_SECRET:-}
       STARTING_CREDITS: ${STARTING_CREDITS:-100}
+      # Keep false in IP-only mode; set TRUST_PROXY=1 in .env when using the
+      # https profile (Caddy is then the single proxy hop in front).
+      TRUST_PROXY: ${TRUST_PROXY:-false}
     volumes:
       - nestflow-data:/app/apps/api/data
     ports:
