@@ -44,7 +44,9 @@ services:
     volumes:
       - caddy-data:/data
       - caddy-config:/config
-    command: sh -c '[ -n "$$DOMAIN" ] || { echo "Set DOMAIN in .env for HTTPS" >&2; exit 1; }; printf "%s {\n  reverse_proxy nestflow:8787\n}\n" "$$DOMAIN" > /etc/caddy/Caddyfile && caddy run --config /etc/caddy/Caddyfile'
+    # Site block for the domain + a catch-all that redirects plain-http (incl.
+    # bare-IP links) to the canonical https origin.
+    command: sh -c '[ -n "$$DOMAIN" ] || { echo "Set DOMAIN in .env for HTTPS" >&2; exit 1; }; printf "%s {\n  reverse_proxy nestflow:8787\n}\nhttp:// {\n  redir https://%s{uri} permanent\n}\n" "$$DOMAIN" "$$DOMAIN" > /etc/caddy/Caddyfile && caddy run --config /etc/caddy/Caddyfile'
 
 volumes:
   nestflow-data:
