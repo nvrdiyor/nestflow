@@ -20,6 +20,20 @@ State is a single SQLite file — no external database to provision.
 | `CORS_ORIGIN` | No | Set to your domain if you ever host the frontend separately. |
 | `STARTING_CREDITS` | No | Free credits per new account (default 100). |
 
+## Fastest: one-command bootstrap (fresh Ubuntu/Debian VPS)
+
+Installs Docker, clones the repo into `/opt/nestflow`, generates a strong admin
+password + JWT secret (printed once — save it), opens the firewall and starts
+the stack. Idempotent — re-run it any time to pull updates and rebuild.
+
+```bash
+# IP-only (site at http://SERVER_IP):
+curl -fsSL https://raw.githubusercontent.com/nvrdiyor/nestflow/main/deploy/vps-bootstrap.sh | bash
+
+# Later, once your domain's A record points at this server — switch to HTTPS:
+curl -fsSL https://raw.githubusercontent.com/nvrdiyor/nestflow/main/deploy/vps-bootstrap.sh | DOMAIN=your-domain.uz bash
+```
+
 ## Option A — VPS with docker compose (recommended)
 
 ```bash
