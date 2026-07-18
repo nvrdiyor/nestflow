@@ -65,12 +65,12 @@ const toolMarkup = (): string => `
       <div class="row">
         <label class="field"><span>${t('app.machine')}</span>
           <select id="machinePreset">
-            <option value="laser" selected>Lazer — 121 × 90 sm</option>
-            <option value="rover">Rover — 240 × 120 sm</option>
+            <option value="laser" selected>Lazer 121×90</option>
+            <option value="rover">Rover 240×120</option>
             <option value="custom">${t('app.custom')}</option>
           </select>
         </label>
-        <label class="field" style="flex:0 0 84px"><span>${t('app.unit')}</span>
+        <label class="field" style="flex:0 0 76px"><span>${t('app.unit')}</span>
           <select id="unit">
             <option value="mm" selected>mm</option>
             <option value="cm">sm</option>
