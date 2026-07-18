@@ -19,6 +19,10 @@ export interface RenderOptions {
   padding?: number;
   /** Draw the sheet index and utilization caption. Default true. */
   labels?: boolean;
+  /** Caption formatter (for localisation). `sheetNo` is 1-based. */
+  sheetLabel?: (sheetNo: number, utilizationPct: string) => string;
+  /** Draw width/height dimension labels along each sheet. Default true. */
+  dimensions?: boolean;
   /** Stroke width in engine units. Default sheet-relative. */
   strokeWidth?: number;
   /** If provided, overlays the optimised cut path and common-line runs. */
@@ -83,17 +87,19 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
   const gap = options.gap ?? Math.max(result.config.sheet.width, result.config.sheet.height) * 0.08;
   const padding = options.padding ?? gap;
   const labels = options.labels ?? true;
+  const dimensions = options.dimensions ?? true;
   const sheetW = result.config.sheet.width;
   const sheetH = result.config.sheet.height;
   const margin = result.config.sheet.margin ?? 0;
   const sheetsUsed = Math.max(result.sheetsUsed, 1);
   const stroke = options.strokeWidth ?? Math.max(sheetW, sheetH) / 400;
   const labelH = labels ? Math.max(sheetW, sheetH) * 0.06 : 0;
+  const dimH = dimensions ? Math.max(sheetW, sheetH) * 0.055 : 0;
 
   const partMap = new Map(parts.map((p) => [p.id, p]));
 
   const totalW = padding * 2 + sheetsUsed * sheetW + (sheetsUsed - 1) * gap;
-  const totalH = padding * 2 + sheetH + labelH;
+  const totalH = padding * 2 + sheetH + labelH + dimH;
 
   const svg: string[] = [];
   svg.push(
@@ -167,12 +173,43 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
 
     if (labels) {
       const util = result.sheetsUsed > 0 ? (result.metrics.utilization * 100).toFixed(1) : '0';
+      const caption = options.sheetLabel ? options.sheetLabel(s + 1, util) : `Sheet ${s + 1} — ${util}% used`;
       svg.push(
         `<text x="${ox.toFixed(2)}" y="${(oy - labelH * 0.3).toFixed(
           2,
-        )}" fill="#e5e7eb" font-size="${(labelH * 0.6).toFixed(2)}">Sheet ${s + 1} — ${escapeXml(
-          `${util}% used`,
-        )}</text>`,
+        )}" fill="#e5e7eb" font-size="${(labelH * 0.6).toFixed(2)}">${escapeXml(caption)}</text>`,
+      );
+    }
+
+    if (dimensions) {
+      // CAD-style dimension callouts: width under the sheet, height at its right.
+      const fmt = (v: number): string => String(Math.round(v * 100) / 100);
+      const fs = Math.max(sheetW, sheetH) * 0.03;
+      const dimStroke = (stroke * 0.7).toFixed(3);
+      const yLine = oy + sheetH + fs * 0.9;
+      const tick = fs * 0.35;
+      svg.push(
+        `<g stroke="#475569" stroke-width="${dimStroke}">` +
+          `<line x1="${ox.toFixed(2)}" y1="${yLine.toFixed(2)}" x2="${(ox + sheetW).toFixed(2)}" y2="${yLine.toFixed(2)}"/>` +
+          `<line x1="${ox.toFixed(2)}" y1="${(yLine - tick).toFixed(2)}" x2="${ox.toFixed(2)}" y2="${(yLine + tick).toFixed(2)}"/>` +
+          `<line x1="${(ox + sheetW).toFixed(2)}" y1="${(yLine - tick).toFixed(2)}" x2="${(ox + sheetW).toFixed(2)}" y2="${(yLine + tick).toFixed(2)}"/>` +
+          `</g>`,
+      );
+      svg.push(
+        `<text x="${(ox + sheetW / 2).toFixed(2)}" y="${(yLine + fs * 1.15).toFixed(2)}" text-anchor="middle" fill="#94a3b8" font-size="${fs.toFixed(2)}">${fmt(sheetW)} mm</text>`,
+      );
+      const xLine = ox + sheetW + fs * 0.9;
+      svg.push(
+        `<g stroke="#475569" stroke-width="${dimStroke}">` +
+          `<line x1="${xLine.toFixed(2)}" y1="${oy.toFixed(2)}" x2="${xLine.toFixed(2)}" y2="${(oy + sheetH).toFixed(2)}"/>` +
+          `<line x1="${(xLine - tick).toFixed(2)}" y1="${oy.toFixed(2)}" x2="${(xLine + tick).toFixed(2)}" y2="${oy.toFixed(2)}"/>` +
+          `<line x1="${(xLine - tick).toFixed(2)}" y1="${(oy + sheetH).toFixed(2)}" x2="${(xLine + tick).toFixed(2)}" y2="${(oy + sheetH).toFixed(2)}"/>` +
+          `</g>`,
+      );
+      const tx = xLine + fs * 1.05;
+      const ty = oy + sheetH / 2;
+      svg.push(
+        `<text x="${tx.toFixed(2)}" y="${ty.toFixed(2)}" text-anchor="middle" fill="#94a3b8" font-size="${fs.toFixed(2)}" transform="rotate(90 ${tx.toFixed(2)} ${ty.toFixed(2)})">${fmt(sheetH)} mm</text>`,
       );
     }
   }

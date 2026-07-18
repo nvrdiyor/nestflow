@@ -2,6 +2,7 @@ import {
   cutMetrics,
   planCutPath,
   resultToSVG,
+  ringBounds,
   type CutMetrics,
   type CutPlan,
   type NestConfig,
@@ -318,6 +319,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     el('svgHost').innerHTML = resultToSVG(r, lastParts, {
       ...(checked('showPath') ? { cutPlans: lastPlans } : {}),
       ...(partSvg ? { partSvg } : {}),
+      sheetLabel: (n, util) => t('app.sheetLabel', { n, util }),
     });
     zoom?.fit();
     renderMetrics(r, cm);
@@ -439,8 +441,22 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     importedParts = parts;
     sources = result.sources ?? new Map(); // exact geometry for SVG imports
     importInfo.classList.toggle('warn', warnings.length > 0);
+    // Overall size of the import, so a wrong-unit file is obvious at a glance.
+    let bMinX = Infinity;
+    let bMinY = Infinity;
+    let bMaxX = -Infinity;
+    let bMaxY = -Infinity;
+    for (const p of parts) {
+      const b = ringBounds(p.contour.outer);
+      if (b.minX < bMinX) bMinX = b.minX;
+      if (b.minY < bMinY) bMinY = b.minY;
+      if (b.maxX > bMaxX) bMaxX = b.maxX;
+      if (b.maxY > bMaxY) bMaxY = b.maxY;
+    }
+    const sizeStr = Number.isFinite(bMinX) ? ` · ${Math.round(bMaxX - bMinX)}×${Math.round(bMaxY - bMinY)} mm` : '';
     importInfo.textContent =
       t('app.importedShapes', { n: parts.length, fmt: isDxf(text, name) ? 'DXF' : 'SVG' }) +
+      sizeStr +
       (warnings.length ? ' · ' + warnings[0] : '');
     updateCostLabel();
     showPreview(t('app.partsReady'));
@@ -516,7 +532,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (currentParts().length) showPreview(readyLabel());
   });
   runBtn.addEventListener('click', run);
-  exportSvgBtn.addEventListener('click', () => lastResult && exportSvg(lastResult, lastParts, makePartSvg(lastResult)));
+  exportSvgBtn.addEventListener('click', () =>
+    lastResult &&
+    exportSvg(lastResult, lastParts, makePartSvg(lastResult), (n, util) => t('app.sheetLabel', { n, util })),
+  );
   exportDxfBtn.addEventListener('click', () => lastResult && exportDxf(lastResult, lastParts));
   el('showPath').addEventListener('change', () => {
     if (lastResult) render(lastResult);

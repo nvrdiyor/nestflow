@@ -18,8 +18,13 @@ export function exportSvg(
   result: NestResult,
   parts: Part[],
   partSvg?: (partId: string, placement: NestResult['placements'][number]) => string | null,
+  sheetLabel?: (sheetNo: number, utilizationPct: string) => string,
 ): void {
-  download('nestflow-layout.svg', resultToSVG(result, parts, partSvg ? { partSvg } : {}), 'image/svg+xml');
+  download(
+    'nestflow-layout.svg',
+    resultToSVG(result, parts, { ...(partSvg ? { partSvg } : {}), ...(sheetLabel ? { sheetLabel } : {}) }),
+    'image/svg+xml',
+  );
 }
 
 /**

@@ -13,6 +13,12 @@ import { sampleBspline } from './bspline';
  *   3. keeps already-closed loops as rings, and
  *   4. chains the remaining open segments end-to-end into closed loops,
  * then groups the loops into parts (outer + holes) like the SVG importer.
+ *
+ * Two DXF-vs-SVG conventions are normalised here:
+ *   - $INSUNITS (header) scales drawing units to millimetres (cm→×10, in→×25.4…)
+ *     so a CorelDRAW/AutoCAD file keeps its true size without a manual scale.
+ *   - DXF is Y-up while our mm frame is Y-down (SVG) — the geometry is flipped
+ *     vertically inside its own bounding box, otherwise text imports upside-down.
  */
 
 interface Pair {
@@ -69,6 +75,20 @@ function entityGroups(pairs: Pair[]): EntityGroup[] {
 function first(pairs: Pair[], code: number): number | undefined {
   for (const p of pairs) if (p.code === code) return Number.parseFloat(p.value);
   return undefined;
+}
+
+/** mm per drawing unit from the header's $INSUNITS variable (1 when absent). */
+function insunitsScale(pairs: Pair[]): number {
+  for (let i = 0; i < pairs.length - 1; i++) {
+    if (pairs[i]!.code === 9 && pairs[i]!.value === '$INSUNITS') {
+      const v = Number.parseInt(pairs[i + 1]!.value, 10);
+      const map: Record<number, number> = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000, 8: 0.0000254, 9: 0.0254 };
+      return map[v] ?? 1;
+    }
+    // Header ends where ENTITIES begin — stop scanning.
+    if (pairs[i]!.code === 2 && pairs[i]!.value === 'ENTITIES') break;
+  }
+  return 1;
 }
 
 function arcPoints(cx: number, cy: number, r: number, startDeg: number, endDeg: number): Point[] {
@@ -191,8 +211,10 @@ function chainLoops(segments: Point[][], tol: number): { rings: Ring[]; openCoun
 }
 
 export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
-  const groups = entityGroups(tokenize(text));
+  const allPairs = tokenize(text);
+  const groups = entityGroups(allPairs);
   if (groups.length === 0) return { parts: [], warnings: ['No DXF ENTITIES section found.'] };
+  const unitScale = insunitsScale(allPairs);
 
   const closedRings: Ring[] = [];
   const openSegments: Point[][] = [];
@@ -343,11 +365,26 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
   const chained = chainLoops(openSegments, tol);
   const rings = [...closedRings, ...chained.rings];
 
+  // DXF is Y-up, our mm frame is Y-down: flip vertically inside the drawing's
+  // own bbox so shapes (and especially text) come in upright, not mirrored.
+  let ryMin = Infinity;
+  let ryMax = -Infinity;
+  for (const ring of rings) {
+    for (const p of ring) {
+      if (p.y < ryMin) ryMin = p.y;
+      if (p.y > ryMax) ryMax = p.y;
+    }
+  }
+  if (Number.isFinite(ryMin)) {
+    const flipAt = ryMin + ryMax;
+    for (const ring of rings) for (const p of ring) p.y = flipAt - p.y;
+  }
+
   if (inserts > 0) warnings.push(`${inserts} block insert(s) skipped — explode blocks before export.`);
   if (chained.openCount > 0) warnings.push(`${chained.openCount} open outline(s) could not be closed.`);
   void splines;
 
-  const result = contoursToParts(ringsToContours(rings), mmPerUnit);
+  const result = contoursToParts(ringsToContours(rings), mmPerUnit * unitScale);
   result.warnings.unshift(...warnings);
   if (result.parts.length === 0 && warnings.length === 0) {
     result.warnings.push('No closed loops found in the DXF.');

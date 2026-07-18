@@ -205,6 +205,7 @@ const en: Dict = {
   'app.mCutTime': 'Cut time',
   'app.mUnplaced': 'Unplaced',
   'app.naive': 'naive',
+  'app.sheetLabel': 'Sheet {n} — {util}% used',
 
   'admin.title': 'Admin dashboard',
   'admin.sub': 'Users, credit usage and activity across NestFlow.',
@@ -414,6 +415,7 @@ const uz: Dict = {
   'app.mCutTime': 'Kesish vaqti',
   'app.mUnplaced': "Joylanmagan",
   'app.naive': 'oddiy',
+  'app.sheetLabel': 'Varaq {n} — {util}% band',
 
   'admin.title': 'Admin panel',
   'admin.sub': 'Foydalanuvchilar, kreditlar va faoliyat.',
@@ -623,6 +625,7 @@ const ru: Dict = {
   'app.mCutTime': 'Время реза',
   'app.mUnplaced': 'Не влезло',
   'app.naive': 'обычно',
+  'app.sheetLabel': 'Лист {n} — заполнено {util}%',
 
   'admin.title': 'Панель админа',
   'admin.sub': 'Пользователи, кредиты и активность.',
