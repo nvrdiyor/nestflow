@@ -34,14 +34,17 @@ services:
     depends_on:
       - nestflow
     environment:
-      DOMAIN: ${DOMAIN:?Set DOMAIN in .env for HTTPS}
+      # No ${DOMAIN:?} here: compose interpolates EVERY service even when its
+      # profile is inactive, which would break plain `docker compose up`.
+      # The guard in `command` enforces DOMAIN when the https profile runs.
+      DOMAIN: ${DOMAIN:-}
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - caddy-data:/data
       - caddy-config:/config
-    command: sh -c 'printf "%s {\n  reverse_proxy nestflow:8787\n}\n" "$$DOMAIN" > /etc/caddy/Caddyfile && caddy run --config /etc/caddy/Caddyfile'
+    command: sh -c '[ -n "$$DOMAIN" ] || { echo "Set DOMAIN in .env for HTTPS" >&2; exit 1; }; printf "%s {\n  reverse_proxy nestflow:8787\n}\n" "$$DOMAIN" > /etc/caddy/Caddyfile && caddy run --config /etc/caddy/Caddyfile'
 
 volumes:
   nestflow-data:
