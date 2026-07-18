@@ -1,4 +1,4 @@
-import { placementContour, resultToSVG, type NestResult, type Part, type Ring } from '@nestflow/engine';
+import { placementContour, resultToSVG, type Contour, type NestResult, type Part, type Ring } from '@nestflow/engine';
 
 /** Triggers a browser download of a text blob. */
 function download(filename: string, text: string, mime: string): void {
@@ -32,7 +32,7 @@ export function exportSvg(
  * out left-to-right like the on-screen view; Y is flipped so the drawing is
  * upright in a Y-up CAD/CAM view. Units are millimetres (`$INSUNITS = 4`).
  */
-export function exportDxf(result: NestResult, parts: Part[]): void {
+export function exportDxf(result: NestResult, parts: Part[], fineContours?: Map<string, Contour>): void {
   const map = new Map(parts.map((p) => [p.id, p]));
   const sheetW = result.config.sheet.width;
   const sheetH = result.config.sheet.height;
@@ -66,7 +66,9 @@ export function exportDxf(result: NestResult, parts: Part[]): void {
   for (const placement of result.placements) {
     const part = map.get(placement.partId);
     if (!part) continue;
-    const contour = placementContour(part, placement);
+    // Prefer the finely-sampled import geometry (smooth curves) when available.
+    const fine = fineContours?.get(placement.partId);
+    const contour = placementContour(fine ? { ...part, contour: fine } : part, placement);
     const offsetX = placement.sheet * (sheetW + gap);
     const layer = `sheet_${placement.sheet + 1}`;
     emitRing(contour.outer, offsetX, layer);

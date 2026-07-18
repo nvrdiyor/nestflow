@@ -31,7 +31,7 @@ interface EntityGroup {
   pairs: Pair[];
 }
 
-const ARC_TOLERANCE = 0.15; // max chord deviation when flattening arcs (DXF units)
+const ARC_TOL_MM = 0.05; // max chord deviation when flattening arcs, in real mm
 
 function tokenize(text: string): Pair[] {
   const lines = text.split(/\r\n|\r|\n/);
@@ -91,11 +91,11 @@ function insunitsScale(pairs: Pair[]): number {
   return 1;
 }
 
-function arcPoints(cx: number, cy: number, r: number, startDeg: number, endDeg: number): Point[] {
+function arcPoints(cx: number, cy: number, r: number, startDeg: number, endDeg: number, tol: number): Point[] {
   let sweep = endDeg - startDeg;
   while (sweep <= 0) sweep += 360; // DXF arcs go CCW
   const sweepRad = (sweep * Math.PI) / 180;
-  const step = 2 * Math.acos(Math.max(0, 1 - ARC_TOLERANCE / Math.max(r, 1e-6)));
+  const step = 2 * Math.acos(Math.max(0, 1 - tol / Math.max(r, 1e-6)));
   const n = Math.max(2, Math.ceil(sweepRad / Math.max(step, 1e-3)));
   const a0 = (startDeg * Math.PI) / 180;
   const pts: Point[] = [];
@@ -107,7 +107,7 @@ function arcPoints(cx: number, cy: number, r: number, startDeg: number, endDeg: 
 }
 
 /** Flattens an LWPOLYLINE bulge arc between p1 and p2 into intermediate points. */
-function bulgePoints(p1: Point, p2: Point, bulge: number): Point[] {
+function bulgePoints(p1: Point, p2: Point, bulge: number, tol: number): Point[] {
   const theta = 4 * Math.atan(bulge); // signed included angle
   if (Math.abs(theta) < 1e-9) return [];
   const dx = p2.x - p1.x;
@@ -122,7 +122,7 @@ function bulgePoints(p1: Point, p2: Point, bulge: number): Point[] {
   const cy = (p1.y + p2.y) / 2 + ny * d;
   const startAng = Math.atan2(p1.y - cy, p1.x - cx);
   const rad = Math.abs(r);
-  const step = 2 * Math.acos(Math.max(0, 1 - ARC_TOLERANCE / Math.max(rad, 1e-6)));
+  const step = 2 * Math.acos(Math.max(0, 1 - tol / Math.max(rad, 1e-6)));
   const n = Math.max(2, Math.ceil(Math.abs(theta) / Math.max(step, 1e-3)));
   const pts: Point[] = [];
   for (let i = 1; i < n; i++) {
@@ -138,7 +138,7 @@ interface Vertex {
   bulge: number;
 }
 
-function polylineFromVertices(verts: Vertex[], closed: boolean): Point[] {
+function polylineFromVertices(verts: Vertex[], closed: boolean, tol: number): Point[] {
   const pts: Point[] = [];
   const n = verts.length;
   if (n === 0) return pts;
@@ -149,13 +149,13 @@ function polylineFromVertices(verts: Vertex[], closed: boolean): Point[] {
     if (isLast && !closed) break;
     const next = verts[(i + 1) % n]!;
     if (Math.abs(v.bulge) > 1e-12) {
-      pts.push(...bulgePoints({ x: v.x, y: v.y }, { x: next.x, y: next.y }, v.bulge));
+      pts.push(...bulgePoints({ x: v.x, y: v.y }, { x: next.x, y: next.y }, v.bulge, tol));
     }
   }
   return pts;
 }
 
-function lwpolyline(pairs: Pair[]): { pts: Point[]; closed: boolean } {
+function lwpolyline(pairs: Pair[], tol: number): { pts: Point[]; closed: boolean } {
   const verts: Vertex[] = [];
   let closed = false;
   let cur: Vertex | null = null;
@@ -168,7 +168,7 @@ function lwpolyline(pairs: Pair[]): { pts: Point[]; closed: boolean } {
     else if (p.code === 42 && cur) cur.bulge = Number.parseFloat(p.value);
   }
   if (cur) verts.push(cur);
-  return { pts: polylineFromVertices(verts, closed), closed };
+  return { pts: polylineFromVertices(verts, closed, tol), closed };
 }
 
 /** Chains open segments into closed loops by matching endpoints within tolerance. */
@@ -215,6 +215,8 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
   const groups = entityGroups(allPairs);
   if (groups.length === 0) return { parts: [], warnings: ['No DXF ENTITIES section found.'] };
   const unitScale = insunitsScale(allPairs);
+  const scale = mmPerUnit * unitScale;
+  const arcTol = ARC_TOL_MM / Math.max(scale, 1e-9); // in drawing units
 
   const closedRings: Ring[] = [];
   const openSegments: Point[][] = [];
@@ -239,7 +241,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
         break;
       }
       case 'LWPOLYLINE': {
-        const { pts, closed } = lwpolyline(g.pairs);
+        const { pts, closed } = lwpolyline(g.pairs, arcTol);
         if (pts.length >= 2) (closed ? closedRings : openSegments).push(pts as Ring);
         break;
       }
@@ -253,7 +255,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
           verts.push({ x: first(vp, 10) ?? 0, y: first(vp, 20) ?? 0, bulge: first(vp, 42) ?? 0 });
         }
         if (gi + 1 < groups.length && groups[gi + 1]!.type === 'SEQEND') gi++;
-        const pts = polylineFromVertices(verts, closed);
+        const pts = polylineFromVertices(verts, closed, arcTol);
         if (pts.length >= 2) (closed ? closedRings : openSegments).push(pts as Ring);
         break;
       }
@@ -262,7 +264,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
         const cy = first(g.pairs, 20);
         const r = first(g.pairs, 40);
         if (cx !== undefined && cy !== undefined && r !== undefined && r > 0) {
-          closedRings.push(arcPoints(cx, cy, r, 0, 360).slice(0, -1));
+          closedRings.push(arcPoints(cx, cy, r, 0, 360, arcTol).slice(0, -1));
         }
         break;
       }
@@ -273,7 +275,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
         const a0 = first(g.pairs, 50);
         const a1 = first(g.pairs, 51);
         if ([cx, cy, r, a0, a1].every((v) => v !== undefined) && r! > 0) {
-          openSegments.push(arcPoints(cx!, cy!, r!, a0!, a1!));
+          openSegments.push(arcPoints(cx!, cy!, r!, a0!, a1!, arcTol));
         }
         break;
       }
@@ -384,7 +386,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
   if (chained.openCount > 0) warnings.push(`${chained.openCount} open outline(s) could not be closed.`);
   void splines;
 
-  const result = contoursToParts(ringsToContours(rings), mmPerUnit * unitScale);
+  const result = contoursToParts(ringsToContours(rings), scale, undefined, 0, true);
   result.warnings.unshift(...warnings);
   if (result.parts.length === 0 && warnings.length === 0) {
     result.warnings.push('No closed loops found in the DXF.');

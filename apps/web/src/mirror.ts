@@ -1,4 +1,4 @@
-import { mirrorContour, type Part } from '@nestflow/engine';
+import { mirrorContour, type Contour, type Part } from '@nestflow/engine';
 import { mirrorX, multiply } from './matrix';
 import type { VectorSource } from './importCommon';
 
@@ -22,5 +22,12 @@ export function mirrorParts(parts: Part[]): Part[] {
 export function mirrorSources(sources: Map<string, VectorSource>): Map<string, VectorSource> {
   const out = new Map<string, VectorSource>();
   for (const [id, s] of sources) out.set(id, { markup: s.markup, matrix: multiply(mirrorX, s.matrix) });
+  return out;
+}
+
+/** Reflects the fine DXF-export contours to match {@link mirrorParts}. */
+export function mirrorFineContours(fine: Map<string, Contour>): Map<string, Contour> {
+  const out = new Map<string, Contour>();
+  for (const [id, c] of fine) out.set(id, mirrorContour(c, 0));
   return out;
 }

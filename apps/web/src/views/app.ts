@@ -3,6 +3,7 @@ import {
   planCutPath,
   resultToSVG,
   ringBounds,
+  type Contour,
   type CutMetrics,
   type CutPlan,
   type NestConfig,
@@ -22,7 +23,7 @@ import { t, wireLangSwitch } from '../i18n';
 import type { VectorSource } from '../importCommon';
 import { partSvgFor } from '../sourceRender';
 import { createZoomPan, type ZoomPan } from '../zoomPan';
-import { mirrorParts, mirrorSources } from '../mirror';
+import { mirrorFineContours, mirrorParts, mirrorSources } from '../mirror';
 
 type Nav = (hash: string) => void;
 
@@ -37,6 +38,7 @@ interface SavedWork {
   importedName: string;
   importInfo: string;
   sources: Map<string, VectorSource>;
+  fineContours: Map<string, Contour>;
   lastParts: Part[];
   lastResult: NestResult | null;
   lastPlans: CutPlan[];
@@ -95,6 +97,7 @@ const toolMarkup = (): string => `
         <label class="field"><span>${t('app.kerf')} <b>mm</b></span><input id="kerf" type="number" value="0.2" min="0" step="0.1" /></label>
       </div>
       <label class="check"><input id="holeFilling" type="checkbox" checked /> <span>${t('app.fillHoles')}</span></label>
+      <label class="check" style="margin-top:10px"><input id="allowRot" type="checkbox" checked /> <span>${t('app.allowRot')}</span></label>
       <label class="check" style="margin-top:10px"><input id="mirror" type="checkbox" /> <span>${t('app.mirror')}</span></label>
       <label class="check" style="margin-top:10px"><input id="showPath" type="checkbox" /> <span>${t('app.showPath')}</span></label>
     </section>
@@ -147,6 +150,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   let lastResult: NestResult | null = savedWork?.lastResult ?? null;
   let lastPlans: CutPlan[] = savedWork?.lastPlans ?? [];
   let sources = savedWork?.sources ?? new Map<string, VectorSource>();
+  let fineContours = savedWork?.fineContours ?? new Map<string, Contour>();
   let zoom: ZoomPan | null = null;
   let busy = false;
   let unit: 'mm' | 'cm' = 'mm';
@@ -169,6 +173,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   // Exact SVG geometry, reflected to match the mirrored parts when mirror is on.
   const currentSources = (): Map<string, VectorSource> => (mirrorOn() ? mirrorSources(sources) : sources);
+  const currentFine = (): Map<string, Contour> => (mirrorOn() ? mirrorFineContours(fineContours) : fineContours);
 
   const instanceCount = (parts: Part[]): number => parts.reduce((s, p) => s + (p.quantity ?? 1), 0);
 
@@ -190,7 +195,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     return {
       sheet,
       units: 'mm',
-      rotations: ROTATIONS,
+      rotations: checked('allowRot') ? ROTATIONS : [0],
       spacing: toMm('spacing'),
       kerf: num('kerf'), // kerf is always mm — it is a sub-millimetre quantity
       holeFilling: checked('holeFilling'),
@@ -439,7 +444,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       return;
     }
     importedParts = parts;
-    sources = result.sources ?? new Map(); // exact geometry for SVG imports
+    sources = result.sources ?? new Map(); // exact geometry (SVG elements / DXF fine paths)
+    fineContours = result.fineContours ?? new Map();
     importInfo.classList.toggle('warn', warnings.length > 0);
     // Overall size of the import, so a wrong-unit file is obvious at a glance.
     let bMinX = Infinity;
@@ -536,7 +542,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     lastResult &&
     exportSvg(lastResult, lastParts, makePartSvg(lastResult), (n, util) => t('app.sheetLabel', { n, util })),
   );
-  exportDxfBtn.addEventListener('click', () => lastResult && exportDxf(lastResult, lastParts));
+  exportDxfBtn.addEventListener('click', () => lastResult && exportDxf(lastResult, lastParts, currentFine()));
   el('showPath').addEventListener('change', () => {
     if (lastResult) render(lastResult);
   });
@@ -599,6 +605,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       importedName,
       importInfo: importInfo.textContent ?? '',
       sources,
+      fineContours,
       lastParts,
       lastResult,
       lastPlans,

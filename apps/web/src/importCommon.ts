@@ -27,8 +27,10 @@ export interface VectorSource {
 export interface ImportResult {
   parts: Part[];
   warnings: string[];
-  /** Per-part original geometry (present for SVG imports). */
+  /** Per-part original geometry for exact rendering (SVG elements, DXF fine polylines). */
   sources?: Map<string, VectorSource>;
+  /** Per-part finely-sampled contour (mm) for high-fidelity DXF export. */
+  fineContours?: Map<string, Contour>;
 }
 
 /** Groups rings into contours: largest rings are outers, rings inside them holes. */
@@ -57,25 +59,36 @@ export function ringsToContours(rings: Ring[]): Contour[] {
   return contours;
 }
 
+const scaleRing = (ring: Ring, mmPerUnit: number): Ring => ring.map((p) => ({ x: p.x * mmPerUnit, y: p.y * mmPerUnit }));
+
 function finalizeRing(ring: Ring, mmPerUnit: number, tolMm: number): Ring {
-  const scaled = ring.map((p) => ({ x: p.x * mmPerUnit, y: p.y * mmPerUnit }));
-  return simplifyRing(scaled, tolMm);
+  return simplifyRing(scaleRing(ring, mmPerUnit), tolMm);
 }
+
+const ringD = (ring: Ring): string =>
+  'M' + ring.map((p) => `${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join('L') + 'Z';
 
 /**
  * Scales, simplifies, filters and labels contours into placeable parts.
  * `toleranceMm` controls vertex reduction — a larger value yields lighter
  * polygons, which matters a lot for glossy/curvy shapes (letters) where a high
  * vertex count makes NFP computation explode.
+ *
+ * With `captureFine`, each part ALSO keeps its unsimplified geometry: an exact
+ * <path> source for smooth rendering/SVG export and the fine mm contour for
+ * high-fidelity DXF export. The nester still works on the light polygons.
  */
 export function contoursToParts(
   contours: Contour[],
   mmPerUnit: number,
   toleranceMm = SIMPLIFY_TOLERANCE_MM,
   startIndex = 0,
+  captureFine = false,
 ): ImportResult {
   const parts: Part[] = [];
   const warnings: string[] = [];
+  const sources = new Map<string, VectorSource>();
+  const fineContours = new Map<string, Contour>();
   let idx = startIndex;
   for (const c of contours) {
     const outer = finalizeRing(c.outer, mmPerUnit, toleranceMm);
@@ -83,12 +96,24 @@ export function contoursToParts(
     const holes = c.holes
       .map((h) => finalizeRing(h, mmPerUnit, toleranceMm))
       .filter((h) => h.length >= 3 && ringArea(h) > MIN_PART_AREA_MM2 * 0.25);
-    parts.push({ id: `p-${idx}`, label: `shape ${idx + 1}`, contour: { outer, holes }, quantity: 1 });
+    const id = `p-${idx}`;
+    parts.push({ id, label: `shape ${idx + 1}`, contour: { outer, holes }, quantity: 1 });
+    if (captureFine) {
+      const fine: Contour = {
+        outer: scaleRing(c.outer, mmPerUnit),
+        holes: c.holes.map((h) => scaleRing(h, mmPerUnit)).filter((h) => h.length >= 3),
+      };
+      fineContours.set(id, fine);
+      sources.set(id, {
+        markup: `<path d="${ringD(fine.outer)} ${fine.holes.map(ringD).join(' ')}"/>`,
+        matrix: [1, 0, 0, 1, 0, 0],
+      });
+    }
     idx++;
     if (parts.length >= MAX_PARTS) {
       warnings.push(`Import capped at ${MAX_PARTS} shapes.`);
       break;
     }
   }
-  return { parts, warnings };
+  return captureFine ? { parts, warnings, sources, fineContours } : { parts, warnings };
 }
