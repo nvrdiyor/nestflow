@@ -40,8 +40,22 @@ function jwtSecret(): string {
   const file = join(DATA_DIR, 'jwt-secret');
   if (existsSync(file)) return readFileSync(file, 'utf8').trim();
   const secret = randomBytes(32).toString('hex');
-  writeFileSync(file, secret, { encoding: 'utf8' });
+  writeFileSync(file, secret, { encoding: 'utf8', mode: 0o600 }); // owner-only on POSIX
   return secret;
+}
+
+/** Parses an integer env var, honoring an explicit 0 (unlike `Number(x) || d`). */
+function intEnv(raw: string | undefined, dflt: number): number {
+  if (raw === undefined || raw === '') return dflt;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : dflt;
+}
+
+/** CORS origin: unset/true = reflect any, "false" = disable cross-origin. */
+function parseCorsOrigin(raw: string | undefined): boolean | string {
+  if (!raw || raw === 'true') return true;
+  if (raw === 'false') return false;
+  return raw;
 }
 
 /**
@@ -66,8 +80,10 @@ export const env = {
   /** Admin credentials — override in production via env / .env. */
   adminUsername: process.env.ADMIN_USERNAME || 'nvrdiyor',
   adminPassword: process.env.ADMIN_PASSWORD || 'd__Iyorbek7777',
+  /** True when the admin password came from the committed default, not env. */
+  adminPasswordIsDefault: !process.env.ADMIN_PASSWORD,
   /** Directory of the built frontend to serve (empty = API only). */
   webDist: process.env.WEB_DIST ?? resolve(API_ROOT, '..', 'web', 'dist'),
-  corsOrigin: process.env.CORS_ORIGIN || true,
-  startingCredits: Number(process.env.STARTING_CREDITS) || 100,
+  corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
+  startingCredits: intEnv(process.env.STARTING_CREDITS, 100),
 } as const;

@@ -35,6 +35,17 @@ export function rotateDeg(deg: number): Mat {
 
 export const mirrorX: Mat = [-1, 0, 0, 1, 0, 0];
 
+/** Inverse of an affine matrix (assumes it is invertible: det ≠ 0). */
+export function invert(m: Mat): Mat {
+  const [a, b, c, d, e, f] = m;
+  const det = a * d - b * c || 1e-12;
+  const ia = d / det;
+  const ib = -b / det;
+  const ic = -c / det;
+  const id = a / det;
+  return [ia, ib, ic, id, -(ia * e + ic * f), -(ib * e + id * f)];
+}
+
 /** Bakes a uniform scale into a matrix (scale applied AFTER m). */
 export function scaled(m: Mat, s: number): Mat {
   return [m[0] * s, m[1] * s, m[2] * s, m[3] * s, m[4] * s, m[5] * s];

@@ -87,6 +87,18 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     reply.header('Referrer-Policy', 'no-referrer');
   });
 
+  // Fastify's default 500 body includes err.message (e.g. raw SQLite constraint
+  // text) — log the details, return a generic body. 4xx pass through unchanged.
+  app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
+    const status = err.statusCode ?? 500;
+    if (status >= 500) {
+      app.log.error(err);
+      void reply.status(500).send({ error: 'Internal server error' });
+    } else {
+      void reply.status(status).send({ error: err.message });
+    }
+  });
+
   app.decorate('db', db);
   app.addHook('onClose', async () => db.close());
 

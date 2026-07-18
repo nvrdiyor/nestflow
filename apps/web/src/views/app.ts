@@ -27,6 +27,25 @@ import { mirrorParts, mirrorSources } from '../mirror';
 
 type Nav = (hash: string) => void;
 
+/**
+ * Work state that must SURVIVE view re-renders (a language switch re-routes and
+ * rebuilds the whole view) — otherwise an imported file and a paid nest result
+ * would silently vanish. Written on cleanup, restored on the next mount.
+ */
+interface SavedWork {
+  mode: 'sample' | 'imported';
+  importedParts: Part[];
+  importedText: string | null;
+  importedName: string;
+  importInfo: string;
+  sources: Map<string, VectorSource>;
+  lastParts: Part[];
+  lastResult: NestResult | null;
+  lastPlans: CutPlan[];
+  mirrored: boolean;
+}
+let savedWork: SavedWork | null = null;
+
 const toolMarkup = (): string => `
 <div class="tool-view"><main class="layout">
   <aside class="panel">
@@ -143,14 +162,14 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const checked = (id: string): boolean => el<HTMLInputElement>(id).checked;
 
   let strategy: Strategy = 'fast';
-  let mode: 'sample' | 'imported' = 'sample';
-  let importedParts: Part[] = [];
-  let importedText: string | null = null;
-  let importedName = '';
-  let lastParts: Part[] = [];
-  let lastResult: NestResult | null = null;
-  let lastPlans: CutPlan[] = [];
-  let sources = new Map<string, VectorSource>();
+  let mode: 'sample' | 'imported' = savedWork?.mode ?? 'sample';
+  let importedParts: Part[] = savedWork?.importedParts ?? [];
+  let importedText: string | null = savedWork?.importedText ?? null;
+  let importedName = savedWork?.importedName ?? '';
+  let lastParts: Part[] = savedWork?.lastParts ?? [];
+  let lastResult: NestResult | null = savedWork?.lastResult ?? null;
+  let lastPlans: CutPlan[] = savedWork?.lastPlans ?? [];
+  let sources = savedWork?.sources ?? new Map<string, VectorSource>();
   let zoom: ZoomPan | null = null;
   let busy = false;
   let runCtx: { instances: number; strategy: Strategy; cost: number; parts: Part[] } | null = null;
@@ -392,9 +411,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     sources = result.sources ?? new Map(); // exact geometry for SVG imports
     mode = 'imported';
     importInfo.classList.toggle('warn', warnings.length > 0);
-    importInfo.textContent = `Imported ${parts.length} shapes from ${isDxf(text, name) ? 'DXF' : 'SVG'}${
-      warnings.length ? ' · ' + warnings[0] : ''
-    }`;
+    importInfo.textContent =
+      t('app.importedShapes', { n: parts.length, fmt: isDxf(text, name) ? 'DXF' : 'SVG' }) +
+      (warnings.length ? ' · ' + warnings[0] : '');
     updateCostLabel();
     showPreview(t('app.partsReady'));
   };
@@ -447,7 +466,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       mode = 'imported';
       importedText = null;
       importedName = '';
-      importInfo.textContent = `Generated ${parts.length} letter pieces from “${text.trim()}”`;
+      importInfo.textContent = t('app.generatedLetters', { n: parts.length, text: text.trim() });
       updateCostLabel();
       showPreview(t('app.lettersReady', { n: parts.length }));
     } catch (err) {
@@ -530,9 +549,22 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     level: vq('.js-zoom-lvl'),
   });
 
+  // Restore work that survived a re-render (e.g. a language switch): the mirror
+  // state must be restored BEFORE rendering so a mirrored result is redrawn with
+  // mirrored sources, and the paid result reappears instead of a blank preview.
+  if (savedWork) {
+    el<HTMLInputElement>('mirror').checked = savedWork.mirrored;
+    if (savedWork.importInfo) importInfo.textContent = savedWork.importInfo;
+  }
   updateCostLabel();
   syncSheetInputs();
-  showPreview(t('app.previewHint'));
+  if (lastResult) {
+    render(lastResult);
+    statusEl.textContent = readyLabel();
+  } else {
+    showPreview(savedWork ? readyLabel() : t('app.previewHint'));
+  }
+  savedWork = null;
 
   // Refresh the balance from the server (kicks stale sessions back to login).
   api
@@ -549,5 +581,17 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   return () => {
     worker.terminate();
     zoom?.destroy();
+    savedWork = {
+      mode,
+      importedParts,
+      importedText,
+      importedName,
+      importInfo: importInfo.textContent ?? '',
+      sources,
+      lastParts,
+      lastResult,
+      lastPlans,
+      mirrored: checked('mirror'),
+    };
   };
 }

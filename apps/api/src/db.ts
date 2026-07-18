@@ -1,6 +1,8 @@
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import { createRequire } from 'node:module';
 import { randomBytes } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 // Loaded via createRequire so bundler-based runners (vitest/vite) don't try to
 // resolve the prefix-only `node:sqlite` builtin, which is absent from
@@ -46,8 +48,11 @@ export class Db {
   private readonly db: DatabaseSyncType;
 
   constructor(file: string) {
+    // A custom DB_FILE may point outside DATA_DIR; SQLite won't create dirs.
+    if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
     this.db = new DatabaseSync(file);
     this.db.exec('PRAGMA journal_mode = WAL;');
+    this.db.exec('PRAGMA busy_timeout = 5000;');
     this.db.exec('PRAGMA foreign_keys = ON;');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS users (
