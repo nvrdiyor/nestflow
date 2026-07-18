@@ -9,10 +9,8 @@ import {
   type Part,
   type Strategy,
 } from '@nestflow/engine';
-import { buildSampleSet, type SampleKey } from '../samples';
 import { importSvgParts } from '../svgImport';
 import { importDxfParts } from '../dxfImport';
-import { textToParts } from '../textToParts';
 import { exportDxf, exportSvg } from '../exporters';
 import { appNavMarkup } from '../ui/nav';
 import * as api from '../api';
@@ -33,7 +31,6 @@ type Nav = (hash: string) => void;
  * would silently vanish. Written on cleanup, restored on the next mount.
  */
 interface SavedWork {
-  mode: 'sample' | 'imported';
   importedParts: Part[];
   importedText: string | null;
   importedName: string;
@@ -46,6 +43,10 @@ interface SavedWork {
 }
 let savedWork: SavedWork | null = null;
 
+/** All rotations are always allowed; the engine always searches at max effort. */
+const ROTATIONS = [0, 90, 180, 270];
+const STRATEGY: Strategy = 'max';
+
 const toolMarkup = (): string => `
 <div class="tool-view"><main class="layout">
   <aside class="panel">
@@ -53,78 +54,50 @@ const toolMarkup = (): string => `
       <h2>${t('app.yourParts')}</h2>
       <div id="drop" class="drop">
         <input id="file" type="file" accept=".svg,.dxf,image/svg+xml" hidden />
-        <span class="drop-ic">⬆</span>
+        <i data-lucide="upload" class="drop-ic"></i>
         <span>${t('app.dropHere')} <button type="button" id="browse" class="link">${t('app.browse')}</button></span>
       </div>
       <div class="row"><label class="field"><span>${t('app.scale')}</span><input id="scale" type="number" value="1" min="0.01" step="0.1" /></label></div>
-      <div class="textgen">
-        <label class="field"><span>${t('app.typeLetters')}</span><input id="text" type="text" value="ASSALOMU ALEYKUM" /></label>
-        <div class="row">
-          <label class="field"><span>${t('app.letterHeight')}</span><input id="letterH" type="number" value="80" min="5" step="5" /></label>
-          <button id="makeText" class="secondary">${t('app.makeLetters')}</button>
-        </div>
-      </div>
-      <p id="importInfo" class="hint">${t('app.usingSample')}</p>
-    </section>
-    <section class="group">
-      <h2>${t('app.sampleSet')}</h2>
-      <label class="field"><span>${t('app.orPickDemo')}</span>
-        <select id="sampleSet">
-          <option value="signshop">Sign shop</option>
-          <option value="letters">Letters &amp; rings</option>
-          <option value="rects">Rectangles &amp; bars</option>
-          <option value="dense">Dense mixed</option>
-        </select>
-      </label>
+      <p id="importInfo" class="hint">${t('app.uploadHint')}</p>
     </section>
     <section class="group">
       <h2>${t('app.sheet')}</h2>
-      <label class="field" style="margin-bottom:10px"><span>${t('app.machine')}</span>
-        <select id="machinePreset">
-          <option value="custom">${t('app.custom')}</option>
-          <option value="laser">Lazer — 1210 × 900 · 2mm</option>
-          <option value="rover">Rover — 2400 × 1200 · 10mm</option>
-        </select>
-      </label>
-      <label class="check" style="margin-bottom:10px"><input id="fitSheet" type="checkbox" checked /> <span>${t('app.fitSheet')}</span></label>
       <div class="row">
-        <label class="field"><span>${t('app.width')}</span><input id="sheetW" type="number" value="800" min="50" step="10" /></label>
-        <label class="field"><span>${t('app.height')}</span><input id="sheetH" type="number" value="600" min="50" step="10" /></label>
+        <label class="field"><span>${t('app.machine')}</span>
+          <select id="machinePreset">
+            <option value="laser" selected>Lazer — 121 × 90 sm</option>
+            <option value="rover">Rover — 240 × 120 sm</option>
+            <option value="custom">${t('app.custom')}</option>
+          </select>
+        </label>
+        <label class="field" style="flex:0 0 84px"><span>${t('app.unit')}</span>
+          <select id="unit">
+            <option value="mm" selected>mm</option>
+            <option value="cm">sm</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label class="field"><span>${t('app.width')} <b class="js-unit">mm</b></span><input id="sheetW" type="number" value="1210" min="1" step="1" /></label>
+        <label class="field"><span>${t('app.height')} <b class="js-unit">mm</b></span><input id="sheetH" type="number" value="900" min="1" step="1" /></label>
       </div>
       <div class="row">
-        <label class="field"><span>${t('app.margin')}</span><input id="margin" type="number" value="5" min="0" step="1" /></label>
+        <label class="field"><span>${t('app.margin')} <b class="js-unit">mm</b></span><input id="margin" type="number" value="5" min="0" step="1" /></label>
         <label class="field"><span>${t('app.sheetCost')}</span><input id="sheetCost" type="number" value="45" min="0" step="1" /></label>
       </div>
+      <label class="check" style="margin-top:10px"><input id="fitSheet" type="checkbox" /> <span>${t('app.fitSheet')}</span></label>
     </section>
     <section class="group">
       <h2>${t('app.cutting')}</h2>
       <div class="row">
-        <label class="field"><span>${t('app.spacing')}</span><input id="spacing" type="number" value="3" min="0" step="0.5" /></label>
-        <label class="field"><span>${t('app.kerf')}</span><input id="kerf" type="number" value="0.2" min="0" step="0.1" /></label>
+        <label class="field"><span>${t('app.spacing')} <b class="js-unit">mm</b></span><input id="spacing" type="number" value="2" min="0" step="0.5" /></label>
+        <label class="field"><span>${t('app.kerf')} <b>mm</b></span><input id="kerf" type="number" value="0.2" min="0" step="0.1" /></label>
       </div>
       <label class="check"><input id="holeFilling" type="checkbox" checked /> <span>${t('app.fillHoles')}</span></label>
       <label class="check" style="margin-top:10px"><input id="mirror" type="checkbox" /> <span>${t('app.mirror')}</span></label>
-      <p class="hint" style="margin-top:6px">${t('app.mirrorHint')}</p>
+      <label class="check" style="margin-top:10px"><input id="showPath" type="checkbox" /> <span>${t('app.showPath')}</span></label>
     </section>
-    <section class="group">
-      <h2>${t('app.rotations')}</h2>
-      <div class="chips">
-        <label class="chip"><input type="checkbox" class="rot" value="0" checked />0°</label>
-        <label class="chip"><input type="checkbox" class="rot" value="90" checked />90°</label>
-        <label class="chip"><input type="checkbox" class="rot" value="180" checked />180°</label>
-        <label class="chip"><input type="checkbox" class="rot" value="270" checked />270°</label>
-      </div>
-    </section>
-    <section class="group">
-      <h2>${t('app.optimization')}</h2>
-      <div class="segmented" id="strategy">
-        <button data-val="fast" class="active">${t('app.fast')}</button>
-        <button data-val="balanced">${t('app.balanced')}</button>
-        <button data-val="max">${t('app.maxSaving')}</button>
-      </div>
-      <label class="check" style="margin-top:12px"><input id="showPath" type="checkbox" /> <span>${t('app.showPath')}</span></label>
-    </section>
-    <button id="run" class="primary">${t('app.nestLayout')}</button>
+    <button id="run" class="primary" disabled>${t('app.nestLayout')}</button>
     <p id="status" class="status"></p>
     <section class="group">
       <h2>${t('app.export')}</h2>
@@ -138,6 +111,11 @@ const toolMarkup = (): string => `
     <div class="metrics" id="metrics"></div>
     <div class="viewport" id="viewport">
       <div class="svg-host" id="svgHost"></div>
+      <div class="progress-veil" id="progressVeil" hidden>
+        <div class="pv-num"><span id="progressPct">0</span><small>%</small></div>
+        <div class="pv-bar"><div class="pv-fill" id="progressFill"></div></div>
+        <div class="pv-label">${t('app.optimizing')}</div>
+      </div>
       <div class="zoom-ctl">
         <button class="js-zoom-out" title="Zoom out" aria-label="Zoom out"><i data-lucide="zoom-out"></i></button>
         <span class="lvl js-zoom-lvl">100%</span>
@@ -161,8 +139,6 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const num = (id: string): number => Number(el<HTMLInputElement>(id).value) || 0;
   const checked = (id: string): boolean => el<HTMLInputElement>(id).checked;
 
-  let strategy: Strategy = 'fast';
-  let mode: 'sample' | 'imported' = savedWork?.mode ?? 'sample';
   let importedParts: Part[] = savedWork?.importedParts ?? [];
   let importedText: string | null = savedWork?.importedText ?? null;
   let importedName = savedWork?.importedName ?? '';
@@ -172,6 +148,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   let sources = savedWork?.sources ?? new Map<string, VectorSource>();
   let zoom: ZoomPan | null = null;
   let busy = false;
+  let unit: 'mm' | 'cm' = 'mm';
   let runCtx: { instances: number; strategy: Strategy; cost: number; parts: Part[] } | null = null;
 
   const statusEl = el('status');
@@ -187,13 +164,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // Keeps the "Mirrored" reminder in the status line while mirror stays on.
   const readyLabel = (): string => (mirrorOn() ? t('app.mirrorOn') : t('app.ready'));
 
-  const currentParts = (): Part[] => {
-    const base =
-      mode === 'imported' && importedParts.length
-        ? importedParts
-        : buildSampleSet(el<HTMLSelectElement>('sampleSet').value as SampleKey);
-    return mirrorOn() ? mirrorParts(base) : base;
-  };
+  const currentParts = (): Part[] => (mirrorOn() ? mirrorParts(importedParts) : importedParts);
 
   // Exact SVG geometry, reflected to match the mirrored parts when mirror is on.
   const currentSources = (): Map<string, VectorSource> => (mirrorOn() ? mirrorSources(sources) : sources);
@@ -202,32 +173,37 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   const fitEnabled = (): boolean => checked('fitSheet');
 
+  /** mm per displayed unit — every length input is shown in `unit`. */
+  const unitFactor = (): number => (unit === 'cm' ? 10 : 1);
+  const toMm = (id: string): number => num(id) * unitFactor();
+  const setLen = (id: string, mm: number): void => {
+    el<HTMLInputElement>(id).value = String(+(mm / unitFactor()).toFixed(2));
+  };
+
   const currentConfig = (): NestConfig => {
-    const rotations = Array.from(document.querySelectorAll<HTMLInputElement>('.rot:checked')).map((r) => Number(r.value));
-    const timeLimitMs = strategy === 'max' ? 8000 : strategy === 'balanced' ? 4000 : undefined;
     // In fit-to-parts mode the packer runs on a generous auto-sized sheet so it
     // clusters everything on one sheet; the result is then cropped to the pack.
     const sheet = fitEnabled()
-      ? { ...estimateSheet(currentParts()), margin: num('margin'), cost: num('sheetCost') }
-      : { width: num('sheetW'), height: num('sheetH'), margin: num('margin'), cost: num('sheetCost') };
-    const config: NestConfig = {
+      ? { ...estimateSheet(currentParts()), margin: toMm('margin'), cost: num('sheetCost') }
+      : { width: toMm('sheetW'), height: toMm('sheetH'), margin: toMm('margin'), cost: num('sheetCost') };
+    return {
       sheet,
       units: 'mm',
-      rotations: rotations.length ? rotations : [0],
-      spacing: num('spacing'),
-      kerf: num('kerf'),
+      rotations: ROTATIONS,
+      spacing: toMm('spacing'),
+      kerf: num('kerf'), // kerf is always mm — it is a sub-millimetre quantity
       holeFilling: checked('holeFilling'),
-      strategy,
+      strategy: STRATEGY,
       seed: 12345,
+      timeLimitMs: 8000,
       machine: { cutSpeed: 25, travelSpeed: 200, hourlyRate: 75, pierceTime: 0.4 },
     };
-    if (timeLimitMs) config.timeLimitMs = timeLimitMs;
-    return config;
   };
 
   const updateCostLabel = (): void => {
-    const cost = nestCost(instanceCount(currentParts()), strategy);
-    runBtn.textContent = `${t('app.nestLayout')} · ${cost} ${t('nav.credits')}`;
+    const n = instanceCount(currentParts());
+    runBtn.textContent = n ? `${t('app.nestLayout')} · ${nestCost(n, STRATEGY)} ${t('nav.credits')}` : t('app.nestLayout');
+    runBtn.disabled = busy || n === 0;
   };
 
   const updateCreditsPill = (credits: number): void => {
@@ -242,12 +218,55 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     const parts = currentParts();
     el('svgHost').innerHTML = parts.length
       ? previewSvg(parts)
-      : '<div class="placeholder">No parts yet.</div>';
+      : `<div class="empty-state"><div class="es-ic">⬆</div><p>${t('app.emptyState')}</p></div>`;
     zoom?.fit();
     exportSvgBtn.disabled = true;
     exportDxfBtn.disabled = true;
     lastResult = null;
-    statusEl.textContent = label;
+    statusEl.textContent = parts.length ? label : '';
+    updateCostLabel();
+  };
+
+  // --- 0→100% progress veil over the viewport while the engine searches ---
+  // The engine reports fraction = elapsed/timeLimit, but only when the search
+  // improves — so a local timer drives a smooth count on the same time basis,
+  // and engine reports can only push it FORWARD, never back.
+  const SEARCH_MS = 8000;
+  const veil = el('progressVeil');
+  const veilPct = el('progressPct');
+  const veilFill = el('progressFill');
+  let shownPct = 0;
+  let veilTimer = 0;
+  let veilStart = 0;
+  const paint = (): void => {
+    veilPct.textContent = String(shownPct);
+    veilFill.style.width = `${shownPct}%`;
+  };
+  const setProgress = (pct: number): void => {
+    shownPct = Math.max(shownPct, Math.min(99, Math.round(pct)));
+    paint();
+  };
+  const showVeil = (): void => {
+    shownPct = 0;
+    veilStart = Date.now();
+    paint();
+    veil.hidden = false;
+    clearInterval(veilTimer);
+    veilTimer = window.setInterval(() => {
+      setProgress(((Date.now() - veilStart) / SEARCH_MS) * 100);
+    }, 120);
+  };
+  const hideVeil = (done: boolean): void => {
+    clearInterval(veilTimer);
+    if (done) {
+      shownPct = 100;
+      paint();
+      setTimeout(() => {
+        veil.hidden = true;
+      }, 350);
+    } else {
+      veil.hidden = true;
+    }
   };
 
   // Sheet W/H are auto-computed in fit mode, so grey the inputs out.
@@ -315,27 +334,33 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     }
     const parts = currentParts();
     if (!parts.length) {
-      statusEl.textContent = 'No parts to nest.';
+      statusEl.textContent = t('app.uploadFirst');
       return;
     }
     const instances = instanceCount(parts);
-    const cost = nestCost(instances, strategy);
+    const cost = nestCost(instances, STRATEGY);
     if (u.credits < cost) {
       statusEl.textContent = t('app.notEnough', { cost, have: u.credits });
       return;
     }
     busy = true;
     runBtn.disabled = true;
-    runCtx = { instances, strategy, cost, parts };
-    statusEl.textContent = t('app.nesting', { n: instances, s: strategy });
+    runCtx = { instances, strategy: STRATEGY, cost, parts };
+    statusEl.textContent = t('app.nesting', { n: instances, s: STRATEGY });
+    showVeil();
     worker.postMessage({ parts, config: currentConfig() });
   };
 
-  worker.onmessage = async (e: MessageEvent<{ result?: NestResult; error?: string }>) => {
+  worker.onmessage = async (e: MessageEvent<{ result?: NestResult; error?: string; progress?: number }>) => {
+    if (e.data.progress !== undefined) {
+      setProgress(e.data.progress);
+      return;
+    }
     if (e.data.error) {
       busy = false;
       runBtn.disabled = false;
       runCtx = null;
+      hideVeil(false);
       statusEl.textContent = `Error: ${e.data.error}`;
       return;
     }
@@ -343,6 +368,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (!r) {
       busy = false;
       runBtn.disabled = false;
+      hideVeil(false);
       return;
     }
     // Charge FIRST (the server reprices) — the paid deliverable (layout render
@@ -364,6 +390,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       } catch (err) {
         busy = false;
         runBtn.disabled = false;
+        hideVeil(false);
         updateCostLabel();
         if (err instanceof api.ApiError && err.status === 401) {
           navigate('#/login');
@@ -376,8 +403,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     busy = false;
     runBtn.disabled = false;
     // Crop the sheet to the packed parts for a clean, full layout (auto-size).
-    const out = fitEnabled() ? fitToParts(r, lastParts, num('margin')) : r;
+    const out = fitEnabled() ? fitToParts(r, lastParts, toMm('margin')) : r;
     render(out);
+    hideVeil(true);
     statusEl.textContent =
       `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${r.iterations} layouts` +
       (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : '');
@@ -387,6 +415,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     busy = false;
     runBtn.disabled = false;
     runCtx = null;
+    hideVeil(false);
     statusEl.textContent = `Worker error: ${e.message}`;
   };
 
@@ -409,7 +438,6 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     }
     importedParts = parts;
     sources = result.sources ?? new Map(); // exact geometry for SVG imports
-    mode = 'imported';
     importInfo.classList.toggle('warn', warnings.length > 0);
     importInfo.textContent =
       t('app.importedShapes', { n: parts.length, fmt: isDxf(text, name) ? 'DXF' : 'SVG' }) +
@@ -445,57 +473,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (f) f.text().then((t) => loadFile(t, f.name));
   });
   el('scale').addEventListener('change', () => {
-    if (mode === 'imported' && importedText) loadFile(importedText, importedName);
-  });
-
-  // --- Text -> letters ---
-  const makeLetters = async (): Promise<void> => {
-    const text = el<HTMLInputElement>('text').value;
-    const h = Number(el<HTMLInputElement>('letterH').value) || 80;
-    importInfo.classList.remove('warn');
-    importInfo.textContent = t('app.building');
-    try {
-      const parts = await textToParts(text, h);
-      if (!parts.length) {
-        importInfo.textContent = 'No letters to cut (spaces only?).';
-        importInfo.classList.add('warn');
-        return;
-      }
-      importedParts = parts;
-      sources = new Map(); // letters use the engine's own rendering
-      mode = 'imported';
-      importedText = null;
-      importedName = '';
-      importInfo.textContent = t('app.generatedLetters', { n: parts.length, text: text.trim() });
-      updateCostLabel();
-      showPreview(t('app.lettersReady', { n: parts.length }));
-    } catch (err) {
-      importInfo.textContent = `Could not build letters: ${err instanceof Error ? err.message : String(err)}`;
-      importInfo.classList.add('warn');
-    }
-  };
-  el('makeText').addEventListener('click', makeLetters);
-  el('text').addEventListener('keydown', (e) => {
-    if ((e as KeyboardEvent).key === 'Enter') makeLetters();
+    if (importedText) loadFile(importedText, importedName);
   });
 
   // --- Controls ---
-  document.querySelectorAll<HTMLButtonElement>('#strategy button').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#strategy button').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      strategy = (btn.dataset.val as Strategy) ?? 'fast';
-      updateCostLabel();
-    });
-  });
-  el('sampleSet').addEventListener('change', () => {
-    mode = 'sample';
-    sources = new Map();
-    importInfo.classList.remove('warn');
-    importInfo.textContent = t('app.usingSample');
-    updateCostLabel();
-    showPreview(readyLabel());
-  });
   el('fitSheet').addEventListener('change', () => {
     syncSheetInputs();
     updateCostLabel();
@@ -505,23 +486,34 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     // from mixing a fresh mirror state with a result nested under the old one.
     showPreview(readyLabel());
   });
+  // mm ↔ sm: convert every length input in place and retag the labels.
+  el('unit').addEventListener('change', () => {
+    const next = el<HTMLSelectElement>('unit').value === 'cm' ? 'cm' : 'mm';
+    if (next === unit) return;
+    const mmValues = ['sheetW', 'sheetH', 'margin', 'spacing'].map((id) => toMm(id));
+    unit = next;
+    ['sheetW', 'sheetH', 'margin', 'spacing'].forEach((id, i) => setLen(id, mmValues[i]!));
+    root.querySelectorAll('.js-unit').forEach((n) => {
+      n.textContent = unit === 'cm' ? 'sm' : 'mm';
+    });
+  });
   el('machinePreset').addEventListener('change', () => {
     const v = el<HTMLSelectElement>('machinePreset').value;
-    // Beds are given in cm in the label; set the real mm size + spacing here.
+    // Bed sizes in mm; written into the inputs in the currently selected unit.
     const presets: Record<string, { w: number; h: number; spacing: number }> = {
       laser: { w: 1210, h: 900, spacing: 2 },
       rover: { w: 2400, h: 1200, spacing: 10 },
     };
     const p = presets[v];
     if (p) {
-      el<HTMLInputElement>('sheetW').value = String(p.w);
-      el<HTMLInputElement>('sheetH').value = String(p.h);
-      el<HTMLInputElement>('spacing').value = String(p.spacing);
+      setLen('sheetW', p.w);
+      setLen('sheetH', p.h);
+      setLen('spacing', p.spacing);
       el<HTMLInputElement>('fitSheet').checked = false; // use the real bed; overflow to more sheets
     }
     syncSheetInputs();
     updateCostLabel();
-    showPreview(readyLabel());
+    if (currentParts().length) showPreview(readyLabel());
   });
   runBtn.addEventListener('click', run);
   exportSvgBtn.addEventListener('click', () => lastResult && exportSvg(lastResult, lastParts, makePartSvg(lastResult)));
@@ -562,7 +554,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     render(lastResult);
     statusEl.textContent = readyLabel();
   } else {
-    showPreview(savedWork ? readyLabel() : t('app.previewHint'));
+    showPreview(readyLabel());
   }
   savedWork = null;
 
@@ -581,8 +573,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   return () => {
     worker.terminate();
     zoom?.destroy();
+    clearInterval(veilTimer);
     savedWork = {
-      mode,
       importedParts,
       importedText,
       importedName,
