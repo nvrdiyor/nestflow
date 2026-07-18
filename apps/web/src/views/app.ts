@@ -39,6 +39,9 @@ interface SavedWork {
   importInfo: string;
   sources: Map<string, VectorSource>;
   fineContours: Map<string, Contour>;
+  importScale: number;
+  baseW: number;
+  baseH: number;
   lastParts: Part[];
   lastResult: NestResult | null;
   lastPlans: CutPlan[];
@@ -60,7 +63,11 @@ const toolMarkup = (): string => `
         <i data-lucide="upload" class="drop-ic"></i>
         <span>${t('app.dropHere')} <button type="button" id="browse" class="link">${t('app.browse')}</button></span>
       </div>
-      <div class="row"><label class="field"><span>${t('app.scale')}</span><input id="scale" type="number" value="1" min="0.01" step="0.1" /></label></div>
+      <div class="row">
+        <label class="field"><span>${t('app.realW')} <b class="js-unit">mm</b></span><input id="realW" type="number" min="0.1" step="1" disabled /></label>
+        <label class="field"><span>${t('app.realH')} <b class="js-unit">mm</b></span><input id="realH" type="number" min="0.1" step="1" disabled /></label>
+      </div>
+      <p class="hint">${t('app.sizeHint')}</p>
       <p id="importInfo" class="hint">${t('app.uploadHint')}</p>
     </section>
     <section class="group">
@@ -151,6 +158,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   let lastPlans: CutPlan[] = savedWork?.lastPlans ?? [];
   let sources = savedWork?.sources ?? new Map<string, VectorSource>();
   let fineContours = savedWork?.fineContours ?? new Map<string, Contour>();
+  let importScale = savedWork?.importScale ?? 1; // mm per file unit, set via real-size fields
+  let baseW = savedWork?.baseW ?? 0; // imported bbox at scale 1, mm
+  let baseH = savedWork?.baseH ?? 0;
   let zoom: ZoomPan | null = null;
   let busy = false;
   let unit: 'mm' | 'cm' = 'mm';
@@ -435,8 +445,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const loadFile = (text: string, name: string): void => {
     importedText = text;
     importedName = name;
-    const scale = num('scale') || 1;
-    const result = isDxf(text, name) ? importDxfParts(text, scale) : importSvgParts(text, scale);
+    const result = isDxf(text, name) ? importDxfParts(text, importScale) : importSvgParts(text, importScale);
     const { parts, warnings } = result;
     if (!parts.length) {
       importInfo.textContent = warnings[0] ?? 'No shapes found.';
@@ -459,7 +468,19 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       if (b.maxX > bMaxX) bMaxX = b.maxX;
       if (b.maxY > bMaxY) bMaxY = b.maxY;
     }
-    const sizeStr = Number.isFinite(bMinX) ? ` · ${Math.round(bMaxX - bMinX)}×${Math.round(bMaxY - bMinY)} mm` : '';
+    const impW = Number.isFinite(bMinX) ? bMaxX - bMinX : 0;
+    const impH = Number.isFinite(bMinX) ? bMaxY - bMinY : 0;
+    if (impW > 0) {
+      baseW = impW / importScale;
+      baseH = impH / importScale;
+      const wEl = el<HTMLInputElement>('realW');
+      const hEl = el<HTMLInputElement>('realH');
+      wEl.disabled = false;
+      hEl.disabled = false;
+      setLen('realW', impW);
+      setLen('realH', impH);
+    }
+    const sizeStr = impW > 0 ? ` · ${Math.round(impW)}×${Math.round(impH)} mm` : '';
     importInfo.textContent =
       t('app.importedShapes', { n: parts.length, fmt: isDxf(text, name) ? 'DXF' : 'SVG' }) +
       sizeStr +
@@ -494,9 +515,18 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     const f = (e as DragEvent).dataTransfer?.files?.[0];
     if (f) f.text().then((t) => loadFile(t, f.name));
   });
-  el('scale').addEventListener('change', () => {
-    if (importedText) loadFile(importedText, importedName);
-  });
+  // Typing the REAL width or height rescales the whole import proportionally —
+  // fixes files exported without unit info (common from CorelDRAW).
+  const applyRealSize = (dim: 'w' | 'h'): void => {
+    if (!importedText || !(baseW > 0)) return;
+    const wanted = toMm(dim === 'w' ? 'realW' : 'realH');
+    const base = dim === 'w' ? baseW : baseH;
+    if (!(wanted > 0) || !(base > 0)) return;
+    importScale = wanted / base;
+    loadFile(importedText, importedName);
+  };
+  el('realW').addEventListener('change', () => applyRealSize('w'));
+  el('realH').addEventListener('change', () => applyRealSize('h'));
 
   // --- Controls ---
   el('fitSheet').addEventListener('change', () => {
@@ -512,9 +542,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   el('unit').addEventListener('change', () => {
     const next = el<HTMLSelectElement>('unit').value === 'cm' ? 'cm' : 'mm';
     if (next === unit) return;
-    const mmValues = ['sheetW', 'sheetH', 'margin', 'spacing'].map((id) => toMm(id));
+    const ids = ['sheetW', 'sheetH', 'margin', 'spacing', 'realW', 'realH'].filter((id) => num(id) > 0);
+    const mmValues = ids.map((id) => toMm(id));
     unit = next;
-    ['sheetW', 'sheetH', 'margin', 'spacing'].forEach((id, i) => setLen(id, mmValues[i]!));
+    ids.forEach((id, i) => setLen(id, mmValues[i]!));
     root.querySelectorAll('.js-unit').forEach((n) => {
       n.textContent = unit === 'cm' ? 'sm' : 'mm';
     });
@@ -572,6 +603,12 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   if (savedWork) {
     el<HTMLInputElement>('mirror').checked = savedWork.mirrored;
     if (savedWork.importInfo) importInfo.textContent = savedWork.importInfo;
+    if (savedWork.baseW > 0) {
+      el<HTMLInputElement>('realW').disabled = false;
+      el<HTMLInputElement>('realH').disabled = false;
+      setLen('realW', savedWork.baseW * savedWork.importScale);
+      setLen('realH', savedWork.baseH * savedWork.importScale);
+    }
   }
   updateCostLabel();
   syncSheetInputs();
@@ -606,6 +643,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       importInfo: importInfo.textContent ?? '',
       sources,
       fineContours,
+      importScale,
+      baseW,
+      baseH,
       lastParts,
       lastResult,
       lastPlans,
