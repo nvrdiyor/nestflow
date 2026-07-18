@@ -59,11 +59,13 @@ set_kv() {
 NEW_ADMIN_PASSWORD=""
 if [ ! -f .env ] || ! grep -q '^ADMIN_PASSWORD=' .env; then
   say "Generating credentials…"
-  NEW_ADMIN_PASSWORD="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)"
+  # openssl, not `tr </dev/urandom | head`: head closing the pipe SIGPIPEs tr,
+  # which under `set -o pipefail` kills the whole script (exit 141).
+  NEW_ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '=+/' | cut -c1-20)"
   touch .env
   set_kv ADMIN_USERNAME "nvrdiyor"
   set_kv ADMIN_PASSWORD "$NEW_ADMIN_PASSWORD"
-  set_kv JWT_SECRET "$(tr -dc 'a-f0-9' </dev/urandom | head -c 64)"
+  set_kv JWT_SECRET "$(openssl rand -hex 32)"
 fi
 if [ -n "$DOMAIN" ]; then
   set_kv DOMAIN "$DOMAIN"
