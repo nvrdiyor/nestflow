@@ -12,7 +12,76 @@ import { identity, invert, multiply, scaled, type Mat } from './matrix';
  *   2. the ORIGINAL geometry element + its transform, so rendering and SVG export
  *      reproduce the exact curves and true dimensions — nothing is re-sampled,
  *      resized, or given an extra outline.
+ *
+ * PHYSICAL SIZE IS PRESERVED EXACTLY. The browser resolves every CSS unit on
+ * the <svg> (mm, cm, in, pt, px) into CSS pixels inside getCTM(), and CSS
+ * fixes 1in = 96px = 25.4mm — so multiplying sampled pixel coordinates by
+ * 25.4/96 yields true millimetres for ANY correctly-declared file
+ * (a CorelDRAW "width=1200mm" drawing imports as exactly 1200mm).
  */
+const MM_PER_PX = 25.4 / 96;
+
+/** Samples one geometry element (single subpath) into a ring, in CSS px. */
+function sampleSingleRing(geo: SVGGeometryElement, ctm: DOMMatrix | null): Ring | null {
+  let total = 0;
+  try {
+    total = geo.getTotalLength();
+  } catch {
+    return null;
+  }
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const step = Math.max(0.4, total / 1200);
+  const n = Math.min(2600, Math.max(10, Math.ceil(total / step)));
+  const ring: Point[] = [];
+  for (let i = 0; i < n; i++) {
+    const raw = geo.getPointAtLength((total * i) / n);
+    const p = ctm ? new DOMPoint(raw.x, raw.y).matrixTransform(ctm) : raw;
+    const prev = ring[ring.length - 1];
+    if (!prev || Math.hypot(p.x - prev.x, p.y - prev.y) > 1e-6) ring.push({ x: p.x, y: p.y });
+  }
+  return ring.length >= 3 ? ring : null;
+}
+
+/**
+ * Rings of one element. For <path> the subpaths are split STRUCTURALLY (on the
+ * M commands) and each is sampled through its own temporary sibling — the old
+ * distance-jump heuristic fused a glyph's counter into its outline whenever the
+ * two started close together (an 'O' from CorelDRAW), producing a
+ * self-intersecting ring that poisoned the NFP search into overlapping parts.
+ */
+function elementRings(node: Element, geo: SVGGeometryElement, ctm: DOMMatrix | null): Ring[] {
+  const d = node.tagName.toLowerCase() === 'path' ? node.getAttribute('d') : null;
+  if (d) {
+    const tokens = d.match(/[Mm][^Mm]*/g) ?? [];
+    // Relative 'm' after the first subpath depends on the previous pen position;
+    // splitting would misplace it — those rare files use the legacy fallback.
+    if (tokens.length > 1 && !tokens.slice(1).some((tk) => tk.startsWith('m'))) {
+      const rings: Ring[] = [];
+      for (const tk of tokens) {
+        const tmp = node.cloneNode(false) as SVGGeometryElement;
+        tmp.setAttribute('d', tk);
+        tmp.removeAttribute('id');
+        node.parentNode?.appendChild(tmp);
+        const r = sampleSingleRing(tmp, typeof tmp.getCTM === 'function' ? tmp.getCTM() : ctm);
+        node.parentNode?.removeChild(tmp);
+        if (r) rings.push(r);
+      }
+      if (rings.length) return rings;
+    }
+    return sampleRings(geo, ctm, safeLength(geo));
+  }
+  const single = sampleSingleRing(geo, ctm);
+  return single ? [single] : [];
+}
+
+function safeLength(geo: SVGGeometryElement): number {
+  try {
+    return geo.getTotalLength();
+  } catch {
+    return 0;
+  }
+}
+
 function sampleRings(geo: SVGGeometryElement, ctm: DOMMatrix | null, total: number): Ring[] {
   const step = Math.max(0.6, total / 900);
   const n = Math.min(2400, Math.max(8, Math.ceil(total / step)));
@@ -64,8 +133,21 @@ export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
   const holder = document.createElement('div');
   holder.style.cssText = 'position:absolute;left:-99999px;top:0;width:0;height:0;overflow:hidden';
   const mounted = document.importNode(svg, true);
+  // Without an explicit size the svg would lay out at 0×0 inside the hidden
+  // holder and every CTM collapses; per spec 1 user unit then equals 1 px.
+  if (!mounted.getAttribute('width')) {
+    const vb = (mounted.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+    if (vb.length === 4 && vb[2]! > 0 && vb[3]! > 0) {
+      mounted.setAttribute('width', `${vb[2]}px`);
+      mounted.setAttribute('height', `${vb[3]}px`);
+    }
+  }
   holder.appendChild(mounted);
   document.body.appendChild(holder);
+
+  // Sampled coordinates are CSS px; convert to true millimetres (96px = 25.4mm),
+  // then apply the user's optional extra factor on top.
+  const pxToMm = MM_PER_PX * mmPerUnit;
 
   const allParts: ImportResult['parts'] = [];
   const warnings: string[] = [];
@@ -76,19 +158,13 @@ export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
     nodes.forEach((node) => {
       const geo = node as unknown as SVGGeometryElement;
       if (typeof geo.getTotalLength !== 'function') return;
-      let total = 0;
-      try {
-        total = geo.getTotalLength();
-      } catch {
-        return;
-      }
-      if (!Number.isFinite(total) || total <= 0) return;
       const ctm = typeof geo.getCTM === 'function' ? geo.getCTM() : null;
-      const rings = sampleRings(geo, ctm, total).filter((r) => Math.abs(ringArea(r)) > 1e-6);
+      const rings = elementRings(node, geo, ctm).filter((r) => Math.abs(ringArea(r)) > 1e-6);
+      if (!rings.length) return;
       const contours: Contour[] = ringsToContours(rings);
-      const { parts } = contoursToParts(contours, mmPerUnit, undefined, idx);
+      const { parts } = contoursToParts(contours, pxToMm, undefined, idx);
       // A single-part element keeps its exact original geometry for output.
-      if (parts.length === 1) sources.set(parts[0]!.id, captureSource(node, ctm, mmPerUnit));
+      if (parts.length === 1) sources.set(parts[0]!.id, captureSource(node, ctm, pxToMm));
       allParts.push(...parts);
       idx += parts.length;
     });

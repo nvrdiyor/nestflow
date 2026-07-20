@@ -1,7 +1,7 @@
 import type { Contour, NestResult, Part, Placement, Point, Ring } from '../types.js';
 import type { CutPlan } from '../cutpath/types.js';
 import { orientContour } from '../model/prepared.js';
-import { translateContour } from '../geometry/polygon.js';
+import { contourArea, translateContour } from '../geometry/polygon.js';
 
 /**
  * Reconstructs the true world-space geometry of a placement from its source part.
@@ -115,6 +115,17 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
     if (p.sheet >= 0 && p.sheet < sheetsUsed) (bySheet[p.sheet] as Placement[]).push(p);
   }
 
+  // Per-sheet utilization: this sheet's part area over its plate area (the
+  // global metric repeated on every sheet misreads as identical fill levels).
+  const sheetUtilPct = (placements: Placement[]): string => {
+    let area = 0;
+    for (const pl of placements) {
+      const part = partMap.get(pl.partId);
+      if (part) area += Math.abs(contourArea(part.contour));
+    }
+    return ((area / Math.max(1e-9, sheetW * sheetH)) * 100).toFixed(1);
+  };
+
   for (let s = 0; s < sheetsUsed; s++) {
     const ox = padding + s * (sheetW + gap);
     const oy = padding + labelH;
@@ -172,7 +183,7 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
     }
 
     if (labels) {
-      const util = result.sheetsUsed > 0 ? (result.metrics.utilization * 100).toFixed(1) : '0';
+      const util = sheetUtilPct(bySheet[s] as Placement[]);
       const caption = options.sheetLabel ? options.sheetLabel(s + 1, util) : `Sheet ${s + 1} — ${util}% used`;
       svg.push(
         `<text x="${ox.toFixed(2)}" y="${(oy - labelH * 0.3).toFixed(
