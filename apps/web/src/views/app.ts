@@ -13,7 +13,7 @@ import {
 } from '@nestflow/engine';
 import { importSvgParts } from '../svgImport';
 import { importDxfParts } from '../dxfImport';
-import { exportDxf, exportSvg } from '../exporters';
+import { exportDxf } from '../exporters';
 import { appNavMarkup } from '../ui/nav';
 import * as api from '../api';
 import { nestCost } from '../cost';
@@ -114,7 +114,6 @@ const toolMarkup = (): string => `
     <section class="group">
       <h2>${t('app.export')}</h2>
       <div class="exports">
-        <button id="exportSvg" class="secondary" disabled>${t('app.downloadSvg')}</button>
         <button id="exportDxf" class="secondary" disabled>${t('app.downloadDxf')}</button>
       </div>
     </section>
@@ -174,7 +173,6 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const viewport = el('viewport');
   const metricsEl = el('metrics');
   const importInfo = el('importInfo');
-  const exportSvgBtn = el<HTMLButtonElement>('exportSvg');
   const exportDxfBtn = el<HTMLButtonElement>('exportDxf');
   const creditsEl = root.querySelector<HTMLElement>('.js-credits');
 
@@ -241,7 +239,6 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       ? previewSvg(parts)
       : `<div class="empty-state"><div class="es-ic">⬆</div><p>${t('app.emptyState')}</p></div>`;
     zoom?.fit();
-    exportSvgBtn.disabled = true;
     exportDxfBtn.disabled = true;
     lastResult = null;
     statusEl.textContent = parts.length ? label : '';
@@ -348,7 +345,6 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     });
     zoom?.fit();
     renderMetrics(r, cm);
-    exportSvgBtn.disabled = false;
     exportDxfBtn.disabled = false;
   };
 
@@ -616,7 +612,6 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (currentParts().length) showPreview(readyLabel());
   });
   runBtn.addEventListener('click', run);
-  exportSvgBtn.addEventListener('click', () => lastResult && exportSvg(lastResult, lastParts, makePartSvg(lastResult)));
   exportDxfBtn.addEventListener('click', () => lastResult && exportDxf(lastResult, lastParts, currentFine()));
   el('showPath').addEventListener('change', () => {
     if (lastResult) render(lastResult);

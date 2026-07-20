@@ -42,6 +42,8 @@ export function exportSvg(
  * Exports the nested layout as a DXF (LWPOLYLINE per contour). Sheets are laid
  * out left-to-right like the on-screen view; Y is flipped so the drawing is
  * upright in a Y-up CAD/CAM view. Units are millimetres (`$INSUNITS = 4`).
+ * Each sheet's boundary rectangle is included on its own `frame` layer, so the
+ * operator sees the plate outline and can hide/skip the layer when cutting.
  */
 export function exportDxf(result: NestResult, parts: Part[], fineContours?: Map<string, Contour>): void {
   const map = new Map(parts.map((p) => [p.id, p]));
@@ -73,6 +75,17 @@ export function exportDxf(result: NestResult, parts: Part[], fineContours?: Map<
       g(20, (sheetH - p.y).toFixed(4)); // flip Y for a Y-up CAD view
     }
   };
+
+  // Sheet boundary frames (their own layer — hide it in CAM if not wanted).
+  const frame: Ring = [
+    { x: 0, y: 0 },
+    { x: sheetW, y: 0 },
+    { x: sheetW, y: sheetH },
+    { x: 0, y: sheetH },
+  ];
+  for (let s = 0; s < Math.max(result.sheetsUsed, 1); s++) {
+    emitRing(frame, s * (sheetW + gap), 'frame');
+  }
 
   for (const placement of result.placements) {
     const part = map.get(placement.partId);

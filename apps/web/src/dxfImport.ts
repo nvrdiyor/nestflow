@@ -172,11 +172,11 @@ function lwpolyline(pairs: Pair[], tol: number): { pts: Point[]; closed: boolean
 }
 
 /** Chains open segments into closed loops by matching endpoints within tolerance. */
-function chainLoops(segments: Point[][], tol: number): { rings: Ring[]; openCount: number } {
+function chainLoops(segments: Point[][], tol: number): { rings: Ring[]; openChains: Point[][] } {
   const near = (a: Point, b: Point): boolean => Math.hypot(a.x - b.x, a.y - b.y) <= tol;
   const open = segments.filter((s) => s.length >= 2).map((s) => s.slice());
   const rings: Ring[] = [];
-  let openCount = 0;
+  const openChains: Point[][] = [];
 
   while (open.length) {
     const chain = open.pop()!;
@@ -204,10 +204,10 @@ function chainLoops(segments: Point[][], tol: number): { rings: Ring[]; openCoun
       chain.pop(); // drop duplicate closing vertex
       if (chain.length >= 3) rings.push(chain);
     } else {
-      openCount++;
+      openChains.push(chain);
     }
   }
-  return { rings, openCount };
+  return { rings, openChains };
 }
 
 export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
@@ -364,8 +364,18 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
   const diag = Number.isFinite(minX) ? Math.hypot(maxX - minX, maxY - minY) : 0;
   const tol = Math.max(1e-4, diag * 2e-4);
 
-  const chained = chainLoops(openSegments, tol);
+  // Chain with escalating tolerance: exports from some CAD tools leave gaps
+  // between a glyph's segments far larger than numeric noise, and a dropped
+  // chain means a letter loses half its outline. Leftovers are retried with a
+  // progressively looser tolerance (never loose enough to bridge two letters).
+  let chained = chainLoops(openSegments, tol);
   const rings = [...closedRings, ...chained.rings];
+  for (const factor of [8, 40, 160]) {
+    if (!chained.openChains.length) break;
+    chained = chainLoops(chained.openChains, tol * factor);
+    rings.push(...chained.rings);
+  }
+  const openCount = chained.openChains.length;
 
   // DXF is Y-up, our mm frame is Y-down: flip vertically inside the drawing's
   // own bbox so shapes (and especially text) come in upright, not mirrored.
@@ -383,7 +393,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
   }
 
   if (inserts > 0) warnings.push(`${inserts} block insert(s) skipped — explode blocks before export.`);
-  if (chained.openCount > 0) warnings.push(`${chained.openCount} open outline(s) could not be closed.`);
+  if (openCount > 0) warnings.push(`${openCount} open outline(s) could not be closed.`);
   void splines;
 
   const result = contoursToParts(ringsToContours(rings), scale, undefined, 0, true);
