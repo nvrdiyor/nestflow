@@ -23,6 +23,12 @@ export interface RenderOptions {
   sheetLabel?: (sheetNo: number, utilizationPct: string) => string;
   /** Draw width/height dimension labels along each sheet. Default true. */
   dimensions?: boolean;
+  /** Draw the dark page background. Default true. */
+  background?: boolean;
+  /** Draw the sheet plate + margin rectangles. Default true. */
+  sheetOutline?: boolean;
+  /** Emit width/height in physical mm units (for machine-ready files). */
+  physicalUnits?: boolean;
   /** Stroke width in engine units. Default sheet-relative. */
   strokeWidth?: number;
   /** If provided, overlays the optimised cut path and common-line runs. */
@@ -88,6 +94,8 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
   const padding = options.padding ?? gap;
   const labels = options.labels ?? true;
   const dimensions = options.dimensions ?? true;
+  const background = options.background ?? true;
+  const sheetOutline = options.sheetOutline ?? true;
   const sheetW = result.config.sheet.width;
   const sheetH = result.config.sheet.height;
   const margin = result.config.sheet.margin ?? 0;
@@ -101,13 +109,15 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
   const totalW = padding * 2 + sheetsUsed * sheetW + (sheetsUsed - 1) * gap;
   const totalH = padding * 2 + sheetH + labelH + dimH;
 
+  // Physical units make the file open at TRUE size in CAD/cutting software.
+  const unitSuffix = options.physicalUnits ? 'mm' : '';
   const svg: string[] = [];
   svg.push(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalW.toFixed(2)} ${totalH.toFixed(
       2,
-    )}" width="${totalW.toFixed(0)}" height="${totalH.toFixed(0)}" font-family="sans-serif">`,
+    )}" width="${totalW.toFixed(2)}${unitSuffix}" height="${totalH.toFixed(2)}${unitSuffix}" font-family="sans-serif">`,
   );
-  svg.push(`<rect x="0" y="0" width="${totalW}" height="${totalH}" fill="#0b0e14"/>`);
+  if (background) svg.push(`<rect x="0" y="0" width="${totalW}" height="${totalH}" fill="#0b0e14"/>`);
 
   // Group placements by sheet.
   const bySheet: Placement[][] = Array.from({ length: sheetsUsed }, () => []);
@@ -129,17 +139,19 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
   for (let s = 0; s < sheetsUsed; s++) {
     const ox = padding + s * (sheetW + gap);
     const oy = padding + labelH;
-    // Sheet plate.
-    svg.push(
-      `<rect x="${ox.toFixed(2)}" y="${oy.toFixed(2)}" width="${sheetW}" height="${sheetH}" fill="#111827" stroke="#334155" stroke-width="${stroke}"/>`,
-    );
-    if (margin > 0) {
+    if (sheetOutline) {
+      // Sheet plate.
       svg.push(
-        `<rect x="${(ox + margin).toFixed(2)}" y="${(oy + margin).toFixed(2)}" width="${(
-          sheetW -
-          2 * margin
-        ).toFixed(2)}" height="${(sheetH - 2 * margin).toFixed(2)}" fill="none" stroke="#1f2937" stroke-width="${stroke}" stroke-dasharray="${(stroke * 4).toFixed(2)}"/>`,
+        `<rect x="${ox.toFixed(2)}" y="${oy.toFixed(2)}" width="${sheetW}" height="${sheetH}" fill="#111827" stroke="#334155" stroke-width="${stroke}"/>`,
       );
+      if (margin > 0) {
+        svg.push(
+          `<rect x="${(ox + margin).toFixed(2)}" y="${(oy + margin).toFixed(2)}" width="${(
+            sheetW -
+            2 * margin
+          ).toFixed(2)}" height="${(sheetH - 2 * margin).toFixed(2)}" fill="none" stroke="#1f2937" stroke-width="${stroke}" stroke-dasharray="${(stroke * 4).toFixed(2)}"/>`,
+        );
+      }
     }
     for (const placement of bySheet[s] as Placement[]) {
       const part = partMap.get(placement.partId);

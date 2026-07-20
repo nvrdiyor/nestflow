@@ -106,8 +106,8 @@
   border-radius: 16px; overflow: hidden; cursor: grab; touch-action: none;
 }
 .viewport.grabbing { cursor: grabbing; }
-.svg-host { position: absolute; top: 0; left: 0; width: 100%; will-change: transform; }
-.svg-host svg { width: 100%; height: auto; display: block; }
+.svg-host { position: absolute; inset: 0; }
+.svg-host > svg { width: 100%; height: 100%; display: block; }
 .svg-host .placeholder { color: var(--muted); font-size: 14px; text-align: center; padding: 120px 20px; }
 .placeholder { color: var(--muted); font-size: 14px; }
 

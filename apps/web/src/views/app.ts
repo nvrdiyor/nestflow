@@ -616,10 +616,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (currentParts().length) showPreview(readyLabel());
   });
   runBtn.addEventListener('click', run);
-  exportSvgBtn.addEventListener('click', () =>
-    lastResult &&
-    exportSvg(lastResult, lastParts, makePartSvg(lastResult), (n, util) => t('app.sheetLabel', { n, util })),
-  );
+  exportSvgBtn.addEventListener('click', () => lastResult && exportSvg(lastResult, lastParts, makePartSvg(lastResult)));
   exportDxfBtn.addEventListener('click', () => lastResult && exportDxf(lastResult, lastParts, currentFine()));
   el('showPath').addEventListener('change', () => {
     if (lastResult) render(lastResult);

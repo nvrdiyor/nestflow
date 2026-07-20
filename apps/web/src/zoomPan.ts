@@ -1,7 +1,11 @@
 /**
- * Wheel-zoom + drag-pan for the result viewport. The transform is applied to a
- * persistent host element (not the SVG, which is replaced on every render), so
- * zoom controls and listeners survive re-renders. Call fit() after new content.
+ * Wheel-zoom + drag-pan for the result viewport — implemented by windowing the
+ * SVG's own viewBox rather than CSS-transforming a rasterised layer, so the
+ * drawing stays VECTOR-SHARP at any zoom level (a CSS scale() blurs badly once
+ * the browser caches the layer at 1×).
+ *
+ * The host's <svg> is replaced on every render; call fit() after new content —
+ * it re-reads the fresh element's full viewBox as the 100% window.
  */
 export interface ZoomPanUi {
   in: HTMLElement;
@@ -15,75 +19,91 @@ export interface ZoomPan {
   destroy(): void;
 }
 
-const MIN = 0.15;
-const MAX = 40;
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+const MIN_SCALE = 0.4;
+const MAX_SCALE = 80;
 
 export function createZoomPan(viewport: HTMLElement, host: HTMLElement, ui: ZoomPanUi): ZoomPan {
-  let scale = 1;
-  let tx = 0;
-  let ty = 0;
+  let full: Box | null = null; // the drawing's own viewBox = 100%
+  let win: Box | null = null; // current visible window
 
-  const clamp = (v: number): number => Math.max(MIN, Math.min(MAX, v));
+  const svgEl = (): SVGSVGElement | null => host.querySelector('svg');
+
   const apply = (): void => {
-    host.style.transformOrigin = '0 0';
-    host.style.transform = `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px) scale(${scale})`;
-    ui.level.textContent = `${Math.round(scale * 100)}%`;
+    const s = svgEl();
+    if (!s || !win || !full) return;
+    s.setAttribute('viewBox', `${win.x.toFixed(3)} ${win.y.toFixed(3)} ${win.w.toFixed(3)} ${win.h.toFixed(3)}`);
+    ui.level.textContent = `${Math.round((full.w / win.w) * 100)}%`;
   };
-  const measureFit = (): void => {
-    const svg = host.querySelector('svg');
-    const vr = viewport.getBoundingClientRect();
-    if (!svg || vr.width < 2 || vr.height < 2) {
-      scale = 1;
-      tx = 0;
-      ty = 0;
-      apply();
+
+  /** Re-reads the CURRENT svg's full drawing box and shows all of it. */
+  const fit = (): void => {
+    const s = svgEl();
+    if (!s) {
+      full = null;
+      win = null;
+      ui.level.textContent = '100%';
       return;
     }
-    // Derive the content's natural size from the viewBox aspect ratio, not from the
-    // SVG's rendered box: a width:100% SVG reports its intrinsic viewBox width until
-    // the flex cell's width is fully resolved, which throws the fit scale off.
-    const vb = (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
-    const aspect = vb.length === 4 && vb[2] > 0 && vb[3] > 0 ? vb[3] / vb[2] : 0;
-    const natW = vr.width; // host is width:100% of the viewport
-    const natH = aspect ? natW * aspect : (svg.getBoundingClientRect().height || 1);
-    scale = clamp(Math.min(vr.width / natW, vr.height / natH) * 0.94);
-    tx = (vr.width - natW * scale) / 2;
-    ty = (vr.height - natH * scale) / 2;
+    // The original viewBox is stashed on first sight — we mutate the live one.
+    const orig = s.dataset.vb0 ?? s.getAttribute('viewBox') ?? '';
+    s.dataset.vb0 = orig;
+    const v = orig.split(/[\s,]+/).map(Number);
+    if (v.length !== 4 || !(v[2]! > 0) || !(v[3]! > 0)) {
+      full = null;
+      win = null;
+      return;
+    }
+    full = { x: v[0]!, y: v[1]!, w: v[2]!, h: v[3]! };
+    win = { ...full };
     apply();
   };
 
-  /**
-   * Scales the content to fit the viewport and centres it. Deferred one frame so
-   * the measurement reads the settled layout (the flex viewport is still sizing
-   * when render() calls fit() immediately after swapping in new content).
-   */
-  let fitRaf = 0;
-  const fit = (): void => {
-    if (fitRaf) cancelAnimationFrame(fitRaf);
-    fitRaf = requestAnimationFrame(() => {
-      fitRaf = 0;
-      measureFit();
-    });
+  /** px-per-user-unit of the current rendering (aspect-fit letterboxing aware). */
+  const pxScale = (rect: DOMRect): number => (win ? Math.min(rect.width / win.w, rect.height / win.h) : 1);
+
+  const clampScale = (wantW: number): number => {
+    if (!full) return wantW;
+    return Math.min(full.w / MIN_SCALE, Math.max(full.w / MAX_SCALE, wantW));
   };
 
-  /** Zoom keeping the point (cx,cy) — in viewport pixels — anchored. */
-  const zoomAt = (cx: number, cy: number, factor: number): void => {
-    const ns = clamp(scale * factor);
-    if (ns === scale) return;
-    tx = cx - ((cx - tx) / scale) * ns;
-    ty = cy - ((cy - ty) / scale) * ns;
-    scale = ns;
+  /** Zoom keeping the viewport point (px,py in client coords) anchored. */
+  const zoomAt = (clientX: number, clientY: number, factor: number): void => {
+    const s = svgEl();
+    if (!s || !win || !full) return;
+    const rect = s.getBoundingClientRect();
+    const k = pxScale(rect);
+    const contentW = win.w * k;
+    const contentH = win.h * k;
+    const offX = (rect.width - contentW) / 2;
+    const offY = (rect.height - contentH) / 2;
+    const ux = win.x + (clientX - rect.left - offX) / k;
+    const uy = win.y + (clientY - rect.top - offY) / k;
+    const newW = clampScale(win.w / factor);
+    const ratio = newW / win.w;
+    win = {
+      x: ux - (ux - win.x) * ratio,
+      y: uy - (uy - win.y) * ratio,
+      w: newW,
+      h: win.h * ratio,
+    };
     apply();
   };
+
   const centerZoom = (factor: number): void => {
     const r = viewport.getBoundingClientRect();
-    zoomAt(r.width / 2, r.height / 2, factor);
+    zoomAt(r.left + r.width / 2, r.top + r.height / 2, factor);
   };
 
   const onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    const r = viewport.getBoundingClientRect();
-    zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.14 : 1 / 1.14);
+    zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.14 : 1 / 1.14);
   };
 
   let dragging = false;
@@ -97,9 +117,12 @@ export function createZoomPan(viewport: HTMLElement, host: HTMLElement, ui: Zoom
     viewport.classList.add('grabbing');
   };
   const onMove = (e: PointerEvent): void => {
-    if (!dragging) return;
-    tx += e.clientX - lx;
-    ty += e.clientY - ly;
+    if (!dragging || !win) return;
+    const s = svgEl();
+    if (!s) return;
+    const k = pxScale(s.getBoundingClientRect());
+    win.x -= (e.clientX - lx) / k;
+    win.y -= (e.clientY - ly) / k;
     lx = e.clientX;
     ly = e.clientY;
     apply();
@@ -117,12 +140,9 @@ export function createZoomPan(viewport: HTMLElement, host: HTMLElement, ui: Zoom
   ui.out.addEventListener('click', () => centerZoom(1 / 1.25));
   ui.fit.addEventListener('click', fit);
 
-  apply();
-
   return {
     fit,
     destroy() {
-      if (fitRaf) cancelAnimationFrame(fitRaf);
       viewport.removeEventListener('wheel', onWheel);
       viewport.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointermove', onMove);

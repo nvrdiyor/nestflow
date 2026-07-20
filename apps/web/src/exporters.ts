@@ -13,16 +13,27 @@ function download(filename: string, text: string, mime: string): void {
   URL.revokeObjectURL(url);
 }
 
-/** Exports the nested layout as a standalone SVG file (exact geometry if given). */
+/**
+ * Exports the nested layout as a MACHINE-READY SVG: only the part geometry
+ * (exact curves when available) at true physical mm size — no captions,
+ * dimension callouts, background or sheet rectangles that a cutter would
+ * misread as cut lines.
+ */
 export function exportSvg(
   result: NestResult,
   parts: Part[],
   partSvg?: (partId: string, placement: NestResult['placements'][number]) => string | null,
-  sheetLabel?: (sheetNo: number, utilizationPct: string) => string,
 ): void {
   download(
     'nestflow-layout.svg',
-    resultToSVG(result, parts, { ...(partSvg ? { partSvg } : {}), ...(sheetLabel ? { sheetLabel } : {}) }),
+    resultToSVG(result, parts, {
+      ...(partSvg ? { partSvg } : {}),
+      labels: false,
+      dimensions: false,
+      background: false,
+      sheetOutline: false,
+      physicalUnits: true,
+    }),
     'image/svg+xml',
   );
 }
