@@ -71,12 +71,12 @@ const toolMarkup = (): string => `
       <p id="importInfo" class="hint">${t('app.uploadHint')}</p>
     </section>
     <section class="group">
-      <h2>${t('app.sheet')}</h2>
+      <h2>${t('app.sheet')} <b class="js-unit" style="text-transform:none">mm</b></h2>
       <div class="row">
         <label class="field"><span>${t('app.machine')}</span>
           <select id="machinePreset">
-            <option value="laser" selected>Lazer 121×90</option>
-            <option value="rover">Rover 240×120</option>
+            <option value="laser" selected>Lazer 1210×900</option>
+            <option value="rover">Rover 2400×1200</option>
             <option value="custom">${t('app.custom')}</option>
           </select>
         </label>
@@ -549,6 +549,12 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     root.querySelectorAll('.js-unit').forEach((n) => {
       n.textContent = unit === 'cm' ? 'sm' : 'mm';
     });
+    // Preset labels follow the unit too (1210×900 mm ↔ 121×90 sm).
+    const presetSel = el<HTMLSelectElement>('machinePreset');
+    for (const opt of Array.from(presetSel.options)) {
+      if (opt.value === 'laser') opt.textContent = unit === 'cm' ? 'Lazer 121×90' : 'Lazer 1210×900';
+      if (opt.value === 'rover') opt.textContent = unit === 'cm' ? 'Rover 240×120' : 'Rover 2400×1200';
+    }
   });
   el('machinePreset').addEventListener('change', () => {
     const v = el<HTMLSelectElement>('machinePreset').value;
