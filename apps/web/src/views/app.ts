@@ -145,7 +145,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   }
   root.innerHTML = appNavMarkup(user) + toolMarkup();
 
-  const worker = new Worker(new URL('../nest.worker.ts', import.meta.url), { type: 'module' });
+  let worker: Worker; // recreated by the hang watchdog if a nest never returns
   const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
   const num = (id: string): number => Number(el<HTMLInputElement>(id).value) || 0;
   const checked = (id: string): boolean => el<HTMLInputElement>(id).checked;
@@ -163,6 +163,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   let baseH = savedWork?.baseH ?? 0;
   let zoom: ZoomPan | null = null;
   let busy = false;
+  let watchdog = 0;
   let unit: 'mm' | 'cm' = 'mm';
   let runCtx: { instances: number; strategy: Strategy; cost: number; parts: Part[] } | null = null;
 
@@ -366,13 +367,16 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     statusEl.textContent = t('app.nesting', { n: instances, s: STRATEGY });
     showVeil();
     worker.postMessage({ parts, config: currentConfig() });
+    armWatchdog();
   };
 
-  worker.onmessage = async (e: MessageEvent<{ result?: NestResult; error?: string; progress?: number }>) => {
+  async function onWorkerMessage(e: MessageEvent<{ result?: NestResult; error?: string; progress?: number }>): Promise<void> {
     if (e.data.progress !== undefined) {
+      armWatchdog(); // the engine is alive — keep waiting
       setProgress(e.data.progress);
       return;
     }
+    disarmWatchdog();
     if (e.data.error) {
       busy = false;
       runBtn.disabled = false;
@@ -427,14 +431,41 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${r.iterations} layouts` +
       (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : '');
     updateCostLabel();
-  };
-  worker.onerror = (e) => {
+  }
+  function onWorkerError(e: ErrorEvent): void {
+    disarmWatchdog();
     busy = false;
     runBtn.disabled = false;
     runCtx = null;
     hideVeil(false);
     statusEl.textContent = `Worker error: ${e.message}`;
-  };
+  }
+  function spawnWorker(): void {
+    worker = new Worker(new URL('../nest.worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = onWorkerMessage;
+    worker.onerror = onWorkerError;
+  }
+  spawnWorker();
+
+  // If the engine goes silent far beyond its 8s budget, the job is stuck on
+  // pathological geometry — kill the worker instead of hanging at 99% forever.
+  // No credits are lost: charging only ever happens after a result arrives.
+  const WATCHDOG_MS = 60_000;
+  function armWatchdog(): void {
+    clearTimeout(watchdog);
+    watchdog = window.setTimeout(() => {
+      worker.terminate();
+      spawnWorker();
+      busy = false;
+      runCtx = null;
+      hideVeil(false);
+      updateCostLabel();
+      statusEl.textContent = t('app.tooComplex');
+    }, WATCHDOG_MS);
+  }
+  function disarmWatchdog(): void {
+    clearTimeout(watchdog);
+  }
 
   // --- Import (SVG / DXF) ---
   const isDxf = (text: string, name: string): boolean => {
@@ -639,6 +670,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     });
 
   return () => {
+    disarmWatchdog();
     worker.terminate();
     zoom?.destroy();
     clearInterval(veilTimer);
