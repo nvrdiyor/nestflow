@@ -40,6 +40,7 @@ interface SavedWork {
   sources: Map<string, VectorSource>;
   fineContours: Map<string, Contour>;
   importScale: number;
+  importTol: number;
   baseW: number;
   baseH: number;
   lastParts: Part[];
@@ -159,6 +160,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   let sources = savedWork?.sources ?? new Map<string, VectorSource>();
   let fineContours = savedWork?.fineContours ?? new Map<string, Contour>();
   let importScale = savedWork?.importScale ?? 1; // mm per file unit, set via real-size fields
+  let importTol = savedWork?.importTol ?? 0; // nesting-polygon deviation, compensated in spacing
   let baseW = savedWork?.baseW ?? 0; // imported bbox at scale 1, mm
   let baseH = savedWork?.baseH ?? 0;
   let zoom: ZoomPan | null = null;
@@ -207,12 +209,14 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       sheet,
       units: 'mm',
       rotations: checked('allowRot') ? ROTATIONS : [0],
-      spacing: toMm('spacing'),
+      // The nesting polygon may deviate up to importTol from the true curve —
+      // widen the spacing by that amount so real geometry keeps the asked gap.
+      spacing: toMm('spacing') + importTol,
       kerf: num('kerf'), // kerf is always mm — it is a sub-millimetre quantity
       holeFilling: checked('holeFilling'),
       strategy: STRATEGY,
       seed: 12345,
-      timeLimitMs: 8000,
+      timeLimitMs: searchBudgetMs(),
       machine: { cutSpeed: 25, travelSpeed: 200, hourlyRate: 75, pierceTime: 0.4 },
     };
   };
@@ -248,7 +252,11 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // The engine reports fraction = elapsed/timeLimit, but only when the search
   // improves — so a local timer drives a smooth count on the same time basis,
   // and engine reports can only push it FORWARD, never back.
-  const SEARCH_MS = 8000;
+  // Bigger jobs get a bigger search budget: heavy real-size letter sets spend
+  // seconds just warming the NFP cache, and an 8s cap left "1 layouts" tried.
+  const searchBudgetMs = (): number =>
+    Math.min(25_000, 8000 + Math.max(0, instanceCount(currentParts()) - 8) * 700);
+  let SEARCH_MS = 8000;
   const veil = el('progressVeil');
   const veilPct = el('progressPct');
   const veilFill = el('progressFill');
@@ -264,6 +272,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     paint();
   };
   const showVeil = (): void => {
+    SEARCH_MS = searchBudgetMs();
     shownPct = 0;
     veilStart = Date.now();
     paint();
@@ -486,6 +495,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     importedParts = parts;
     sources = result.sources ?? new Map(); // exact geometry (SVG elements / DXF fine paths)
     fineContours = result.fineContours ?? new Map();
+    importTol = Math.min(2, result.simplifyTolMm ?? 0);
     importInfo.classList.toggle('warn', warnings.length > 0);
     // Overall size of the import, so a wrong-unit file is obvious at a glance.
     let bMinX = Infinity;
@@ -682,6 +692,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       sources,
       fineContours,
       importScale,
+      importTol,
       baseW,
       baseH,
       lastParts,

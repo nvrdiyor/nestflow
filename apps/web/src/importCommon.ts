@@ -31,6 +31,9 @@ export interface ImportResult {
   sources?: Map<string, VectorSource>;
   /** Per-part finely-sampled contour (mm) for high-fidelity DXF export. */
   fineContours?: Map<string, Contour>;
+  /** Max simplification deviation (mm) of the nesting polygons — callers add
+   *  this to the spacing so TRUE geometry can never end up closer than asked. */
+  simplifyTolMm?: number;
 }
 
 /** Groups rings into contours: largest rings are outers, rings inside them holes. */
@@ -62,7 +65,7 @@ export function ringsToContours(rings: Ring[]): Contour[] {
 const scaleRing = (ring: Ring, mmPerUnit: number): Ring => ring.map((p) => ({ x: p.x * mmPerUnit, y: p.y * mmPerUnit }));
 
 /** Hard cap on nesting-polygon vertices — NFP cost grows explosively past this. */
-const MAX_RING_VERTICES = 140;
+const MAX_RING_VERTICES = 70;
 
 /**
  * Nesting polygon for a ring: simplification scales with the part's size (a
@@ -83,14 +86,18 @@ function finalizeRing(ring: Ring, mmPerUnit: number, tolMm: number): Ring {
     if (p.y > maxY) maxY = p.y;
   }
   const maxDim = Math.max(maxX - minX, maxY - minY, 1);
-  let tol = Math.max(tolMm, maxDim / 500);
+  let tol = Math.max(tolMm, maxDim / 350);
   let out = simplifyRing(scaled, tol);
   while (out.length > MAX_RING_VERTICES && tol < maxDim / 10) {
-    tol *= 1.7;
+    tol *= 1.6;
     out = simplifyRing(scaled, tol);
   }
+  lastFinalizeTol = Math.max(lastFinalizeTol, tol);
   return out;
 }
+
+/** Max simplify tolerance used by the current contoursToParts call (module-scoped scratch). */
+let lastFinalizeTol = 0;
 
 const ringD = (ring: Ring): string =>
   'M' + ring.map((p) => `${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join('L') + 'Z';
@@ -116,6 +123,7 @@ export function contoursToParts(
   const warnings: string[] = [];
   const sources = new Map<string, VectorSource>();
   const fineContours = new Map<string, Contour>();
+  lastFinalizeTol = 0;
   let idx = startIndex;
   for (const c of contours) {
     const outer = finalizeRing(c.outer, mmPerUnit, toleranceMm);
@@ -142,5 +150,8 @@ export function contoursToParts(
       break;
     }
   }
-  return captureFine ? { parts, warnings, sources, fineContours } : { parts, warnings };
+  const simplifyTolMm = lastFinalizeTol;
+  return captureFine
+    ? { parts, warnings, sources, fineContours, simplifyTolMm }
+    : { parts, warnings, simplifyTolMm };
 }
