@@ -45,6 +45,7 @@ export function runSimulatedAnnealing(
     const candidate = neighbor(current, counts, rng);
     const candEval = evaluate(ctx, candidate);
     iterations++;
+    if ((iterations & 7) === 0) onImprove?.(bestEval.fitness); // heartbeat
     const delta = candEval.fitness - currentFit;
     if (delta < 0 || rng.next() < Math.exp(-delta / Math.max(temp, 1e-6))) {
       current = candidate;

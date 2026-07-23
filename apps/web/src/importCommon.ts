@@ -10,7 +10,7 @@ import {
 
 /** Shared helpers for turning raw imported rings into engine-ready parts. */
 
-import type { Mat } from './matrix';
+import { multiply, translate, type Mat } from './matrix';
 
 export const MAX_PARTS = 400;
 export const MIN_PART_AREA_MM2 = 1;
@@ -154,4 +154,66 @@ export function contoursToParts(
   return captureFine
     ? { parts, warnings, sources, fineContours, simplifyTolMm }
     : { parts, warnings, simplifyTolMm };
+}
+
+const translateRing = (ring: Ring, dx: number, dy: number): Ring => ring.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+
+/**
+ * Merges REPEATED shapes into one part with a quantity. A sign job is mostly
+ * duplicate letters — "132 parts" is often ~25 unique glyphs — and the NFP
+ * cache is keyed by part id, so collapsing duplicates shrinks the search's
+ * geometry work by an order of magnitude (and identical letters share a color).
+ *
+ * Every part is first normalised to its own bbox origin (the placement offset
+ * absorbs the difference); the exact source and fine export contour are shifted
+ * by the same amount so rendering stays perfectly aligned.
+ */
+export function dedupeRepeatedParts(
+  parts: Part[],
+  sources?: Map<string, VectorSource>,
+  fineContours?: Map<string, Contour>,
+): Part[] {
+  const seen = new Map<string, Part>();
+  const out: Part[] = [];
+  for (const part of parts) {
+    let minX = Infinity;
+    let minY = Infinity;
+    for (const p of part.contour.outer) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+    }
+    if (!Number.isFinite(minX)) {
+      out.push(part);
+      continue;
+    }
+    part.contour = {
+      outer: translateRing(part.contour.outer, -minX, -minY),
+      holes: part.contour.holes.map((h) => translateRing(h, -minX, -minY)),
+    };
+    if (sources) {
+      const src = sources.get(part.id);
+      if (src) sources.set(part.id, { markup: src.markup, matrix: multiply(translate(-minX, -minY), src.matrix) });
+    }
+    if (fineContours) {
+      const fine = fineContours.get(part.id);
+      if (fine) {
+        fineContours.set(part.id, {
+          outer: translateRing(fine.outer, -minX, -minY),
+          holes: fine.holes.map((h) => translateRing(h, -minX, -minY)),
+        });
+      }
+    }
+    const ringKey = (r: Ring): string => r.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(';');
+    const key = ringKey(part.contour.outer) + '||' + part.contour.holes.map(ringKey).join('|');
+    const kept = seen.get(key);
+    if (kept) {
+      kept.quantity = (kept.quantity ?? 1) + (part.quantity ?? 1);
+      sources?.delete(part.id);
+      fineContours?.delete(part.id);
+    } else {
+      seen.set(key, part);
+      out.push(part);
+    }
+  }
+  return out;
 }

@@ -50,8 +50,10 @@ export function runGeneticAlgorithm(
   // seeding so a large job (whose single evaluation is already costly) cannot
   // overrun its time budget by a full population before the loop even starts.
   let population: Individual[] = [evalChromo(heuristicChromosome(instances))];
+  onImprove?.((population[0] as Individual).eval.fitness); // heartbeat from the very first eval
   while (population.length < params.populationSize && now() < deadline) {
     population.push(evalChromo(randomChromosome(instances, counts, rng)));
+    onImprove?.((population[population.length - 1] as Individual).eval.fitness); // heartbeat
   }
   population.sort((a, b) => a.eval.fitness - b.eval.fitness);
   let best = population[0] as Individual;
@@ -77,6 +79,7 @@ export function runGeneticAlgorithm(
       const rotation = uniformCrossover(parentA.chromo.rotation, parentB.chromo.rotation, rng);
       const child = mutate({ order, rotation }, counts, rng, params.swapRate, params.rotRate);
       next.push(evalChromo(child));
+      onImprove?.((next[next.length - 1] as Individual).eval.fitness); // heartbeat per eval
     }
     population = next;
     population.sort((a, b) => a.eval.fitness - b.eval.fitness);

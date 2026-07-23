@@ -46,14 +46,24 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, options: { method?: string; body?: unknown; admin?: boolean } = {}): Promise<T> {
   const token = options.admin ? localStorage.getItem(K_ADMIN_TOKEN) : localStorage.getItem(K_TOKEN);
-  const res = await fetch(`${BASE}${path}`, {
-    method: options.method ?? 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
-  });
+  // A hung request must never freeze the app (the nest flow awaits the charge
+  // with the UI locked) — abort after 25s and surface a normal error instead.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 25_000);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method: options.method ?? 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      signal: abort.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   let body: Record<string, unknown> = {};
   try {
     body = (await res.json()) as Record<string, unknown>;

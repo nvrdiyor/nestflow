@@ -169,6 +169,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   let runCtx: { instances: number; strategy: Strategy; cost: number; parts: Part[] } | null = null;
 
   const statusEl = el('status');
+  const statusMsg = (text: string, isError = false): void => {
+    statusEl.textContent = text;
+    statusEl.classList.toggle('error', isError);
+  };
   const runBtn = el<HTMLButtonElement>('run');
   const viewport = el('viewport');
   const metricsEl = el('metrics');
@@ -213,7 +217,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       kerf: num('kerf'), // kerf is always mm — it is a sub-millimetre quantity
       holeFilling: checked('holeFilling'),
       strategy: STRATEGY,
-      seed: 12345,
+      seed: (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0, // fresh search every run
       timeLimitMs: searchBudgetMs(),
       machine: { cutSpeed: 25, travelSpeed: 200, hourlyRate: 75, pierceTime: 0.4 },
     };
@@ -357,19 +361,19 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     }
     const parts = currentParts();
     if (!parts.length) {
-      statusEl.textContent = t('app.uploadFirst');
+      statusMsg(t('app.uploadFirst'), true);
       return;
     }
     const instances = instanceCount(parts);
     const cost = nestCost(instances, STRATEGY);
     if (u.credits < cost) {
-      statusEl.textContent = t('app.notEnough', { cost, have: u.credits });
+      statusMsg(t('app.notEnough', { cost, have: u.credits }), true);
       return;
     }
     busy = true;
     runBtn.disabled = true;
     runCtx = { instances, strategy: STRATEGY, cost, parts };
-    statusEl.textContent = t('app.nesting', { n: instances, s: STRATEGY });
+    statusMsg(t('app.nesting', { n: instances, s: STRATEGY }));
     showVeil();
     worker.postMessage({ parts, config: currentConfig() });
     armWatchdog();
@@ -387,7 +391,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       runBtn.disabled = false;
       runCtx = null;
       hideVeil(false);
-      statusEl.textContent = `Error: ${e.data.error}`;
+      statusMsg(`Error: ${e.data.error}`, true);
       return;
     }
     const r = e.data.result;
@@ -422,7 +426,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
           navigate('#/login');
           return;
         }
-        statusEl.textContent = err instanceof api.ApiError ? err.message : t('app.chargeFail');
+        statusMsg(err instanceof api.ApiError ? err.message : t('app.chargeFail'), true);
         return; // result intentionally not rendered or exportable
       }
     }
@@ -432,9 +436,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     const out = fitEnabled() ? fitToParts(r, lastParts, toMm('margin')) : r;
     render(out);
     hideVeil(true);
-    statusEl.textContent =
+    statusMsg(
       `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${r.iterations} layouts` +
-      (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : '');
+        (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : ''),
+    );
     updateCostLabel();
   }
   function onWorkerError(e: ErrorEvent): void {
@@ -443,7 +448,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     runBtn.disabled = false;
     runCtx = null;
     hideVeil(false);
-    statusEl.textContent = `Worker error: ${e.message}`;
+    statusMsg(`Worker error: ${e.message}`, true);
   }
   function spawnWorker(): void {
     worker = new Worker(new URL('../nest.worker.ts', import.meta.url), { type: 'module' });
@@ -455,7 +460,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // If the engine goes silent far beyond its 8s budget, the job is stuck on
   // pathological geometry — kill the worker instead of hanging at 99% forever.
   // No credits are lost: charging only ever happens after a result arrives.
-  const WATCHDOG_MS = 60_000;
+  const WATCHDOG_MS = 120_000;
   function armWatchdog(): void {
     clearTimeout(watchdog);
     watchdog = window.setTimeout(() => {
@@ -465,7 +470,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       runCtx = null;
       hideVeil(false);
       updateCostLabel();
-      statusEl.textContent = t('app.tooComplex');
+      statusMsg(t('app.tooComplex'), true);
     }, WATCHDOG_MS);
   }
   function disarmWatchdog(): void {
@@ -519,7 +524,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     }
     const sizeStr = impW > 0 ? ` · ${Math.round(impW)}×${Math.round(impH)} mm` : '';
     importInfo.textContent =
-      t('app.importedShapes', { n: parts.length, fmt: isDxf(text, name) ? 'DXF' : 'SVG' }) +
+      t('app.importedShapes', { n: instanceCount(parts), fmt: isDxf(text, name) ? 'DXF' : 'SVG' }) +
       sizeStr +
       (warnings.length ? ' · ' + warnings[0] : '');
     updateCostLabel();

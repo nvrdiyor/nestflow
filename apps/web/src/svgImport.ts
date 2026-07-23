@@ -1,6 +1,6 @@
 import type { Contour, Part, Point, Ring } from '@nestflow/engine';
 import { pointInRing, ringArea, ringCentroid } from '@nestflow/engine';
-import { contoursToParts, ringsToContours, type ImportResult, type VectorSource } from './importCommon';
+import { contoursToParts, dedupeRepeatedParts, ringsToContours, type ImportResult, type VectorSource } from './importCommon';
 import { identity, invert, multiply, scaled, type Mat } from './matrix';
 
 /**
@@ -174,7 +174,8 @@ export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
 
   if (allParts.length === 0) warnings.push('No usable closed shapes were found. Open paths and text are skipped.');
   const grouped = groupNestedElements(allParts, sources);
-  return { parts: grouped, warnings, sources };
+  const deduped = dedupeRepeatedParts(grouped, sources);
+  return { parts: deduped, warnings, sources };
 }
 
 /**
