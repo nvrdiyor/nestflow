@@ -235,13 +235,17 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     await app.register(fastifyStatic, {
       root: opts.webDist,
       wildcard: true,
+      // Disable the plugin's own Cache-Control so setHeaders below wins:
       // index.html must NEVER be cached (it names the hashed bundles) or users
       // keep running stale builds for days; the hashed assets are immutable.
+      cacheControl: false,
       setHeaders: (res, filePath) => {
         if (filePath.endsWith('.html')) {
           res.setHeader('cache-control', 'no-cache');
         } else if (/[\\/]assets[\\/]/.test(filePath)) {
           res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+        } else {
+          res.setHeader('cache-control', 'public, max-age=3600');
         }
       },
     });
