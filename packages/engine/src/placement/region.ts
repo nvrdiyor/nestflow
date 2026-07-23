@@ -4,6 +4,7 @@ import type { NfpCache } from '../nfp/cache.js';
 import type { PackObjective, PlacedItem } from './types.js';
 import { innerFitRect, innerFitRectBounds } from '../nfp/ifp.js';
 import { difference, isEmptyRegion, translateRegion, union } from '../geometry/boolean.js';
+import { pointInRing, ringCentroid, translateRing } from '../geometry/polygon.js';
 
 /**
  * Broad-phase test: could NFP(item, shape) — the region of reference positions
@@ -67,6 +68,21 @@ export function feasibleRegion(
     const holes = item.shape.holes;
     if (holes.length === 0) continue;
     for (let hi = 0; hi < holes.length; hi++) {
+      // ONE tenant per hole: multi-tenant collision handling has produced
+      // overlapping stuffing in production files; a lone tenant per hole is
+      // provably safe (only the owner surrounds it).
+      const holeRing = holes[hi];
+      if (!holeRing) continue;
+      let occupied = false;
+      for (const p of placed) {
+        if (p.insideHoleOf !== item.partId) continue;
+        const c = ringCentroid(p.shape.rawOuter);
+        if (pointInRing({ x: c.x + p.x, y: c.y + p.y }, translateRing(holeRing, item.x, item.y))) {
+          occupied = true;
+          break;
+        }
+      }
+      if (occupied) continue;
       let hf = cache.holeIfp(item.shape, hi, shape);
       if (hf.length === 0) continue;
       hf = translateRegion(hf, item.x, item.y);

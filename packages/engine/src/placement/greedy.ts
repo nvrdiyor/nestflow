@@ -92,6 +92,65 @@ function commit(
  * orientation/position on the earliest sheet that can host it is chosen using
  * the configured objective. Deterministic given its inputs.
  */
+/**
+ * Post-search rescue: tries to move the (few) parts stranded on the LAST sheet
+ * back onto earlier sheets. The greedy pass places parts in chromosome order,
+ * so a single awkward part can open a whole extra sheet even when a pocket for
+ * it exists earlier — exactly the "one lonely letter on sheet 2" case.
+ */
+export function reinsertLastSheet(result: GreedyResult, opts: GreedyOptions): void {
+  const sheets = result.sheets;
+  if (sheets.length < 2) return;
+  const lastIndex = sheets.length - 1;
+  const last = sheets[lastIndex] as SheetLayout;
+  if (last.items.length === 0 || last.items.length > 6) return;
+
+  for (const item of [...last.items]) {
+    let targetSheet = -1;
+    let cand: Candidate | null = null;
+    for (let s = 0; s < lastIndex; s++) {
+      const sheet = sheets[s] as SheetLayout;
+      const region = feasibleRegion(opts.usable, sheet.items, item.shape, opts.cache, opts.holeFilling);
+      const c = chooseReference(region, sheet.bounds, item.shape, opts.usable, opts.objective);
+      if (c) {
+        targetSheet = s;
+        cand = c;
+        break;
+      }
+    }
+    if (targetSheet < 0 || !cand) continue;
+    last.items.splice(last.items.indexOf(item), 1);
+    const sheet = sheets[targetSheet] as SheetLayout;
+    item.x = cand.x;
+    item.y = cand.y;
+    delete item.insideHoleOf;
+    const owner = detectHoleOwner(item.shape, cand.x, cand.y, sheet.items);
+    if (owner) item.insideHoleOf = owner;
+    sheet.items.push(item);
+    const b = item.shape.bounds;
+    const wb = { minX: cand.x + b.minX, minY: cand.y + b.minY, maxX: cand.x + b.maxX, maxY: cand.y + b.maxY };
+    sheet.bounds = sheet.bounds
+      ? {
+          minX: Math.min(sheet.bounds.minX, wb.minX),
+          minY: Math.min(sheet.bounds.minY, wb.minY),
+          maxX: Math.max(sheet.bounds.maxX, wb.maxX),
+          maxY: Math.max(sheet.bounds.maxY, wb.maxY),
+        }
+      : wb;
+    const pl = result.placements.find(
+      (q) => q.partId === item.partId && q.instance === item.instance && q.sheet === lastIndex,
+    );
+    if (pl) {
+      pl.sheet = targetSheet;
+      pl.x = cand.x;
+      pl.y = cand.y;
+      delete pl.insideHoleOf;
+      if (item.insideHoleOf) pl.insideHoleOf = item.insideHoleOf;
+    }
+  }
+  if (last.items.length === 0) sheets.pop();
+}
+
 export function greedyPlace(
   instances: PartInstance[],
   order: number[],

@@ -1,7 +1,7 @@
 import type { NestConfig, NestResult, Part } from './types.js';
 import { prepareInstances } from './model/prepared.js';
 import { NfpCache } from './nfp/cache.js';
-import type { GreedyOptions } from './placement/index.js';
+import { reinsertLastSheet, type GreedyOptions } from './placement/index.js';
 import { runSearch } from './search/index.js';
 import { computeMetrics } from './metrics/index.js';
 
@@ -71,6 +71,9 @@ export function nest(parts: Part[], config: NestConfig): NestResult {
     ...(config.timeLimitMs !== undefined ? { timeLimitMs: config.timeLimitMs } : {}),
     ...(config.onProgress ? { onProgress: config.onProgress } : {}),
   });
+
+  // Rescue pass: pull stragglers off the last sheet into earlier pockets.
+  reinsertLastSheet(outcome.result, greedyOpts);
 
   const metrics = computeMetrics(outcome.result, config);
 
