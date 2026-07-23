@@ -46,7 +46,7 @@ interface SavedWork {
   lastParts: Part[];
   lastResult: NestResult | null;
   lastPlans: CutPlan[];
-  mirrored: boolean;
+  mirrorMode: string;
 }
 let savedWork: SavedWork | null = null;
 
@@ -106,7 +106,13 @@ const toolMarkup = (): string => `
       </div>
       <label class="check"><input id="holeFilling" type="checkbox" checked /> <span>${t('app.fillHoles')}</span></label>
       <label class="check" style="margin-top:10px"><input id="allowRot" type="checkbox" checked /> <span>${t('app.allowRot')}</span></label>
-      <label class="check" style="margin-top:10px"><input id="mirror" type="checkbox" /> <span>${t('app.mirror')}</span></label>
+      <label class="field" style="margin-top:10px"><span>${t('app.mirror')}</span>
+        <select id="mirrorMode">
+          <option value="off" selected>${t('app.mirrorOff')}</option>
+          <option value="auto">${t('app.mirrorAuto')}</option>
+          <option value="all">${t('app.mirrorAll')}</option>
+        </select>
+      </label>
       <label class="check" style="margin-top:10px"><input id="showPath" type="checkbox" /> <span>${t('app.showPath')}</span></label>
     </section>
     <button id="run" class="primary" disabled>${t('app.nestLayout')}</button>
@@ -180,7 +186,11 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const exportDxfBtn = el<HTMLButtonElement>('exportDxf');
   const creditsEl = root.querySelector<HTMLElement>('.js-credits');
 
-  const mirrorOn = (): boolean => checked('mirror');
+  type MirrorMode = 'off' | 'auto' | 'all';
+  const mirrorMode = (): MirrorMode => (el<HTMLSelectElement>('mirrorMode').value as MirrorMode) ?? 'off';
+  // 'all' pre-mirrors the geometry (back-side cutting); 'auto' merely lets the
+  // OPTIMIZER flip individual parts when that packs tighter.
+  const mirrorOn = (): boolean => mirrorMode() === 'all';
   // Keeps the "Mirrored" reminder in the status line while mirror stays on.
   const readyLabel = (): string => (mirrorOn() ? t('app.mirrorOn') : t('app.ready'));
 
@@ -211,6 +221,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       sheet,
       units: 'mm',
       rotations: checked('allowRot') ? ROTATIONS : [0],
+      allowMirror: mirrorMode() === 'auto', // per-part, only where it helps
       // The nesting polygon may deviate up to importTol from the true curve —
       // widen the spacing by that amount so real geometry keeps the asked gap.
       spacing: toMm('spacing') + importTol,
@@ -575,9 +586,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     syncSheetInputs();
     updateCostLabel();
   });
-  el('mirror').addEventListener('change', () => {
-    // Re-preview reflected parts; nulling lastResult keeps a later render/export
-    // from mixing a fresh mirror state with a result nested under the old one.
+  el('mirrorMode').addEventListener('change', () => {
+    // Re-preview; nulling lastResult keeps a later render/export from mixing a
+    // fresh mirror state with a result nested under the old one.
     showPreview(readyLabel());
   });
   // mm ↔ sm: convert every length input in place and retag the labels.
@@ -645,7 +656,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // state must be restored BEFORE rendering so a mirrored result is redrawn with
   // mirrored sources, and the paid result reappears instead of a blank preview.
   if (savedWork) {
-    el<HTMLInputElement>('mirror').checked = savedWork.mirrored;
+    el<HTMLSelectElement>('mirrorMode').value = savedWork.mirrorMode || 'off';
     if (savedWork.importInfo) importInfo.textContent = savedWork.importInfo;
     if (savedWork.baseW > 0) {
       el<HTMLInputElement>('realW').disabled = false;
@@ -695,7 +706,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       lastParts,
       lastResult,
       lastPlans,
-      mirrored: checked('mirror'),
+      mirrorMode: mirrorMode(),
     };
   };
 }
