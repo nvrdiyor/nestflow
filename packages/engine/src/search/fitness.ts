@@ -4,13 +4,18 @@ import type { GreedyResult } from '../placement/index.js';
 const W_UNPLACED = 1e6;
 /** Weight of one consumed sheet — the primary objective is fewer sheets. */
 const W_SHEET = 1e3;
+/** Weight of the LAST sheet's fill fraction — the drain gradient. */
+const W_DRAIN = 50;
 
 /**
  * Scores a layout; lower is better. The objective is lexicographic in practice:
  *   1. minimise unplaced parts,
  *   2. then minimise sheets used,
- *   3. then maximise compaction (minimise the combined part bounding area,
- *      normalised by sheet area) so the final sheet is left as empty as possible.
+ *   3. then DRAIN the last sheet: its part-area fraction is penalised, so
+ *      moving any single part off the final sheet improves fitness. Without
+ *      this term a "3 letters spilled onto sheet 2" layout scores the same as
+ *      "30 spilled" and the search has no gradient toward clearing the spill.
+ *   4. then maximise compaction of the earlier sheets.
  */
 export function fitnessOf(result: GreedyResult, sheetArea: number): number {
   const unplaced = result.unplaced.length;
@@ -22,5 +27,12 @@ export function fitnessOf(result: GreedyResult, sheetArea: number): number {
     }
   }
   const compaction = sheetArea > 0 ? boundSum / sheetArea : 0;
-  return unplaced * W_UNPLACED + sheetsUsed * W_SHEET + compaction;
+  let drain = 0;
+  if (sheetsUsed > 1 && sheetArea > 0) {
+    const last = result.sheets[sheetsUsed - 1];
+    let lastArea = 0;
+    for (const item of last?.items ?? []) lastArea += item.shape.netArea;
+    drain = lastArea / sheetArea;
+  }
+  return unplaced * W_UNPLACED + sheetsUsed * W_SHEET + drain * W_DRAIN + compaction;
 }

@@ -67,7 +67,10 @@ export function runSearch(
     return { result: best.result, fitness: best.fitness, iterations };
   }
 
-  const ga = runGeneticAlgorithm(ctx, counts, params, rng, deadline, now, report);
+  // Reserve a slice of the budget for the annealing polish: on huge jobs a
+  // single GA generation can consume the whole budget and SA never runs.
+  const gaDeadline = startTime + params.timeLimitMs * 0.65;
+  const ga = runGeneticAlgorithm(ctx, counts, params, rng, Math.min(gaDeadline, deadline), now, report);
   iterations += ga.iterations;
   const sa = runSimulatedAnnealing(
     ctx,

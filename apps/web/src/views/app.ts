@@ -267,7 +267,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // Bigger jobs get a bigger search budget: heavy real-size letter sets spend
   // seconds just warming the NFP cache, and an 8s cap left "1 layouts" tried.
   const searchBudgetMs = (): number =>
-    Math.min(25_000, 8000 + Math.max(0, instanceCount(currentParts()) - 8) * 700);
+    Math.min(40_000, 8000 + Math.max(0, instanceCount(currentParts()) - 8) * 700);
   let SEARCH_MS = 8000;
   const veil = el('progressVeil');
   const veilPct = el('progressPct');
