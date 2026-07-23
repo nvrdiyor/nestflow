@@ -366,13 +366,19 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
 
   // Chain with escalating tolerance: exports from some CAD tools leave gaps
   // between a glyph's segments far larger than numeric noise, and a dropped
-  // chain means a letter loses half its outline. Leftovers are retried with a
-  // progressively looser tolerance (never loose enough to bridge two letters).
+  // chain means a letter loses half its outline. Retries are HARD-CAPPED at
+  // 1.5 real millimetres — an uncapped retry once bridged 46mm across a
+  // glyph's mouth, fusing it into a bogus ring that swallowed neighbouring
+  // bars as "holes" and stuck out of the sheet.
   let chained = chainLoops(openSegments, tol);
   const rings = [...closedRings, ...chained.rings];
-  for (const factor of [8, 40, 160]) {
+  let prevTol = tol;
+  for (const retryMm of [0.5, 1.5]) {
     if (!chained.openChains.length) break;
-    chained = chainLoops(chained.openChains, tol * factor);
+    const t = retryMm / Math.max(scale, 1e-9); // absolute mm, in drawing units
+    if (t <= prevTol) continue;
+    prevTol = t;
+    chained = chainLoops(chained.openChains, t);
     rings.push(...chained.rings);
   }
   const openCount = chained.openChains.length;
