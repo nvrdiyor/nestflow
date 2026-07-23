@@ -390,7 +390,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     armWatchdog();
   };
 
-  async function onWorkerMessage(e: MessageEvent<{ result?: NestResult; error?: string; progress?: number }>): Promise<void> {
+  async function onWorkerMessage(e: MessageEvent<{ result?: NestResult; error?: string; progress?: number; overlaps?: number }>): Promise<void> {
     if (e.data.progress !== undefined) {
       armWatchdog(); // the engine is alive — keep waiting
       setProgress(e.data.progress);
@@ -447,10 +447,15 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     const out = fitEnabled() ? fitToParts(r, lastParts, toMm('margin')) : r;
     render(out);
     hideVeil(true);
-    statusMsg(
-      `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${r.iterations} layouts` +
-        (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : ''),
-    );
+    const overlaps = e.data.overlaps ?? 0;
+    if (overlaps > 0) {
+      statusMsg(t('app.overlapWarn', { n: overlaps }), true);
+    } else {
+      statusMsg(
+        `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${r.iterations} layouts` +
+          (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : ''),
+      );
+    }
     updateCostLabel();
   }
   function onWorkerError(e: ErrorEvent): void {
