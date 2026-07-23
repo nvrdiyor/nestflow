@@ -1,6 +1,6 @@
 import type { Contour, Part, Point, Ring } from '@nestflow/engine';
 import { pointInRing, ringArea, ringCentroid } from '@nestflow/engine';
-import { contoursToParts, dedupeRepeatedParts, ringsToContours, type ImportResult, type VectorSource } from './importCommon';
+import { contoursToParts, dedupeRepeatedParts, innerPointOf, ringsToContours, type ImportResult, type VectorSource } from './importCommon';
 import { identity, invert, multiply, scaled, type Mat } from './matrix';
 
 /**
@@ -190,7 +190,7 @@ export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
 function groupNestedElements(parts: Part[], sources: Map<string, VectorSource>): Part[] {
   if (parts.length < 2) return parts;
   const items = parts
-    .map((part) => ({ part, area: ringArea(part.contour.outer), centroid: ringCentroid(part.contour.outer) }))
+    .map((part) => ({ part, area: ringArea(part.contour.outer), probe: innerPointOf(part.contour.outer) }))
     .sort((a, b) => b.area - a.area);
 
   // Containment depth counts EVERY ring (outers and pre-existing holes) of
@@ -203,12 +203,12 @@ function groupNestedElements(parts: Part[], sources: Map<string, VectorSource>):
     let innermostOuter = -1;
     for (let j = 0; j < i; j++) {
       if (items[j]!.area <= items[i]!.area) continue;
-      if (pointInRing(items[i]!.centroid, items[j]!.part.contour.outer)) {
+      if (pointInRing(items[i]!.probe, items[j]!.part.contour.outer)) {
         depth++;
         innermostOuter = j; // items are sorted by area desc, so the last hit is the smallest
       }
       for (const hole of items[j]!.part.contour.holes) {
-        if (pointInRing(items[i]!.centroid, hole)) depth++;
+        if (pointInRing(items[i]!.probe, hole)) depth++;
       }
     }
     if (depth % 2 === 1 && innermostOuter >= 0) holeOf.set(i, innermostOuter);

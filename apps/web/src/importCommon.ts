@@ -36,28 +36,78 @@ export interface ImportResult {
   simplifyTolMm?: number;
 }
 
-/** Groups rings into contours: largest rings are outers, rings inside them holes. */
+/**
+ * A point guaranteed to lie INSIDE the ring's material. The centroid is NOT
+ * that: a concave letter's centroid sits in its mouth, and when the source
+ * layout interlocks letters (a rotated U nested into another U — exactly how
+ * sign makers arrange files) the centroid lands on the NEIGHBOUR's body and
+ * the containment test fuses two real parts into one. An interior point can
+ * only be inside another ring if the parts truly overlap.
+ */
+export function innerPointOf(ring: Ring): { x: number; y: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of ring) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  const nudge = Math.max(1e-6, Math.hypot(maxX - minX, maxY - minY) * 5e-4);
+  for (let i = 0; i < ring.length; i++) {
+    const a = ring[i]!;
+    const b = ring[(i + 1) % ring.length]!;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < nudge) continue;
+    const mx = (a.x + b.x) / 2;
+    const my = (a.y + b.y) / 2;
+    const nx = -dy / len;
+    const ny = dx / len;
+    for (const side of [1, -1]) {
+      const p = { x: mx + nx * nudge * side, y: my + ny * nudge * side };
+      if (pointInRing(p, ring)) return p;
+    }
+  }
+  return ringCentroid(ring);
+}
+
+/**
+ * Groups rings into contours by even-odd containment depth of each ring's
+ * INTERIOR point: even depth = a part's outer, odd depth = a hole of its
+ * innermost container. A quote glyph sitting inside an O's counter in the
+ * source layout is depth 2 — a standalone part, not a hole of the O.
+ */
 export function ringsToContours(rings: Ring[]): Contour[] {
   const valid = rings
     .filter((r) => r.length >= 3 && Math.abs(ringArea(r)) > 1e-6)
-    .map((r) => ({ ring: r, area: Math.abs(ringArea(r)), centroid: ringCentroid(r) }))
+    .map((r) => ({ ring: r, area: Math.abs(ringArea(r)), probe: innerPointOf(r) }))
     .sort((a, b) => b.area - a.area);
 
-  const used = new Array<boolean>(valid.length).fill(false);
   const contours: Contour[] = [];
+  const contourOf: Array<Contour | null> = [];
   for (let i = 0; i < valid.length; i++) {
-    if (used[i]) continue;
-    used[i] = true;
-    const outer = valid[i]!.ring;
-    const holes: Ring[] = [];
-    for (let j = i + 1; j < valid.length; j++) {
-      if (used[j]) continue;
-      if (pointInRing(valid[j]!.centroid, outer)) {
-        holes.push(valid[j]!.ring);
-        used[j] = true;
+    let depth = 0;
+    let innermost = -1;
+    for (let j = 0; j < i; j++) {
+      if (pointInRing(valid[i]!.probe, valid[j]!.ring)) {
+        depth++;
+        innermost = j; // sorted by area desc — the last hit is the smallest container
       }
     }
-    contours.push({ outer, holes });
+    if (depth % 2 === 0) {
+      const c: Contour = { outer: valid[i]!.ring, holes: [] };
+      contours.push(c);
+      contourOf.push(c);
+    } else {
+      const owner = innermost >= 0 ? contourOf[innermost] : null;
+      if (owner) owner.holes.push(valid[i]!.ring);
+      else contours.push({ outer: valid[i]!.ring, holes: [] });
+      contourOf.push(null);
+    }
   }
   return contours;
 }
