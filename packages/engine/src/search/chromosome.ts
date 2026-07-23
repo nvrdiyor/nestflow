@@ -49,6 +49,32 @@ export function heuristicChromosome(instances: PartInstance[]): Chromosome {
 }
 
 /**
+ * Several strong seeds with different orderings. Besides "big area first",
+ * height- and width-sorted orders reproduce how a human packs letter jobs into
+ * rows of similar height — starting the GA there instead of hoping it discovers
+ * row packing on its own. Identical parts sort adjacently, which also warms the
+ * NFP cache in long same-glyph runs.
+ */
+export function heuristicChromosomes(instances: PartInstance[]): Chromosome[] {
+  const dims = instances.map((inst) => {
+    const rot0 = inst.part.rotations[0] ?? 0;
+    const b = inst.part.oriented(rot0, false).bounds;
+    return { w: b.maxX - b.minX, h: b.maxY - b.minY, area: inst.part.netArea };
+  });
+  const zeros = instances.map(() => 0);
+  const by = (score: (i: number) => number): Chromosome => ({
+    order: instances.map((_, i) => i).sort((a, b) => score(b) - score(a)),
+    rotation: zeros.slice(),
+  });
+  return [
+    by((i) => dims[i]!.area),
+    by((i) => dims[i]!.h * 1e6 + dims[i]!.w),
+    by((i) => dims[i]!.w * 1e6 + dims[i]!.h),
+    by((i) => Math.max(dims[i]!.w, dims[i]!.h)),
+  ];
+}
+
+/**
  * Order crossover (OX): preserves a contiguous slice of parent `a` and fills the
  * remaining positions with parent `b`'s genes in their relative order.
  */

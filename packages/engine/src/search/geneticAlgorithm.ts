@@ -2,7 +2,7 @@ import type { Rng } from '../rng.js';
 import { evaluate, type EvalContext, type Evaluation } from './evaluator.js';
 import type { SearchParams } from './strategy.js';
 import {
-  heuristicChromosome,
+  heuristicChromosomes,
   mutate,
   orderCrossover,
   randomChromosome,
@@ -49,8 +49,12 @@ export function runGeneticAlgorithm(
   // Seed population: heuristic first, then random. Honour the deadline while
   // seeding so a large job (whose single evaluation is already costly) cannot
   // overrun its time budget by a full population before the loop even starts.
-  let population: Individual[] = [evalChromo(heuristicChromosome(instances))];
-  onImprove?.((population[0] as Individual).eval.fitness); // heartbeat from the very first eval
+  let population: Individual[] = [];
+  for (const seed of heuristicChromosomes(instances)) {
+    population.push(evalChromo(seed));
+    onImprove?.((population[population.length - 1] as Individual).eval.fitness); // heartbeat
+    if (now() >= deadline && population.length > 0) break;
+  }
   while (population.length < params.populationSize && now() < deadline) {
     population.push(evalChromo(randomChromosome(instances, counts, rng)));
     onImprove?.((population[population.length - 1] as Individual).eval.fitness); // heartbeat

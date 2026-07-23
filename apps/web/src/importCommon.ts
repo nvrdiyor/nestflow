@@ -65,7 +65,7 @@ export function ringsToContours(rings: Ring[]): Contour[] {
 const scaleRing = (ring: Ring, mmPerUnit: number): Ring => ring.map((p) => ({ x: p.x * mmPerUnit, y: p.y * mmPerUnit }));
 
 /** Hard cap on nesting-polygon vertices — NFP cost grows explosively past this. */
-const MAX_RING_VERTICES = 70;
+const MAX_RING_VERTICES = 110;
 
 /**
  * Nesting polygon for a ring: simplification scales with the part's size (a
@@ -86,7 +86,7 @@ function finalizeRing(ring: Ring, mmPerUnit: number, tolMm: number): Ring {
     if (p.y > maxY) maxY = p.y;
   }
   const maxDim = Math.max(maxX - minX, maxY - minY, 1);
-  let tol = Math.max(tolMm, maxDim / 350);
+  let tol = Math.max(tolMm, maxDim / 500);
   let out = simplifyRing(scaled, tol);
   while (out.length > MAX_RING_VERTICES && tol < maxDim / 10) {
     tol *= 1.6;
