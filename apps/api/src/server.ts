@@ -232,13 +232,25 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
 
   // ---------- static frontend (production single-deploy) ----------
   if (opts.webDist && existsSync(join(opts.webDist, 'index.html'))) {
-    await app.register(fastifyStatic, { root: opts.webDist, wildcard: true });
+    await app.register(fastifyStatic, {
+      root: opts.webDist,
+      wildcard: true,
+      // index.html must NEVER be cached (it names the hashed bundles) or users
+      // keep running stale builds for days; the hashed assets are immutable.
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('cache-control', 'no-cache');
+        } else if (/[\\/]assets[\\/]/.test(filePath)) {
+          res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+        }
+      },
+    });
     app.setNotFoundHandler((req, reply) => {
       if (req.raw.url?.startsWith('/api/')) {
         reply.code(404).send({ error: 'Not found' });
       } else {
-        // SPA fallback
-        reply.type('text/html').sendFile('index.html');
+        // SPA fallback — same no-cache rule as direct index.html hits.
+        reply.header('cache-control', 'no-cache').type('text/html').sendFile('index.html');
       }
     });
   }
