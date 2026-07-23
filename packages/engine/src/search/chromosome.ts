@@ -66,12 +66,42 @@ export function heuristicChromosomes(instances: PartInstance[]): Chromosome[] {
     order: instances.map((_, i) => i).sort((a, b) => score(b) - score(a)),
     rotation: zeros.slice(),
   });
-  return [
+  const seeds = [
     by((i) => dims[i]!.area),
     by((i) => dims[i]!.h * 1e6 + dims[i]!.w),
     by((i) => dims[i]!.w * 1e6 + dims[i]!.h),
     by((i) => Math.max(dims[i]!.w, dims[i]!.h)),
   ];
+  // The classic hand trick for letter rows: consecutive copies of the SAME
+  // glyph alternate upright / upside-down so A-V-A-V interlock (see any
+  // manual sign layout). Added as extra seeds when 180° is allowed.
+  const alt180 = (base: Chromosome): Chromosome | null => {
+    const rotation = base.rotation.slice();
+    let found = false;
+    let prevId = '';
+    let flip = false;
+    for (const idx of base.order) {
+      const inst = instances[idx];
+      if (!inst) continue;
+      const id = inst.part.id;
+      flip = id === prevId ? !flip : false;
+      prevId = id;
+      if (flip) {
+        const opts = inst.part.orientationOptions();
+        const k = opts.findIndex((o) => o.rotation === 180 && !o.mirror);
+        if (k >= 0) {
+          rotation[idx] = k;
+          found = true;
+        }
+      }
+    }
+    return found ? { order: base.order.slice(), rotation } : null;
+  };
+  for (const base of [seeds[1] as Chromosome, seeds[2] as Chromosome]) {
+    const v = alt180(base);
+    if (v) seeds.push(v);
+  }
+  return seeds;
 }
 
 /**

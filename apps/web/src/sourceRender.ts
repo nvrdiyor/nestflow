@@ -21,9 +21,6 @@ export function partSvgFor(source: VectorSource, placement: Placement, worldStro
   if (placement.mirrored) m = multiply(m, mirrorX);
   m = multiply(m, source.matrix);
   const color = colorFor(placement.partId);
-  const localStroke = worldStroke / scaleOf(source.matrix);
-  return (
-    `<g transform="${toSvg(m)}" fill="${color}" fill-opacity="0.85" fill-rule="evenodd" ` +
-    `stroke="${color}" stroke-width="${localStroke.toFixed(4)}">${source.markup}</g>`
-  );
+  void worldStroke; // parts draw flat-filled: no stroke may be added to the shapes
+  return `<g transform="${toSvg(m)}" fill="${color}" fill-rule="evenodd">${source.markup}</g>`;
 }

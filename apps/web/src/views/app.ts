@@ -104,7 +104,7 @@ const toolMarkup = (): string => `
         <label class="field"><span>${t('app.spacing')} <b class="js-unit">mm</b></span><input id="spacing" type="number" value="2" min="0" step="0.5" /></label>
         <label class="field"><span>${t('app.kerf')} <b>mm</b></span><input id="kerf" type="number" value="0.2" min="0" step="0.1" /></label>
       </div>
-      <label class="check"><input id="holeFilling" type="checkbox" checked /> <span>${t('app.fillHoles')}</span></label>
+      <label class="check"><input id="holeFilling" type="checkbox" /> <span>${t('app.fillHoles')}</span></label>
       <label class="check" style="margin-top:10px"><input id="allowRot" type="checkbox" checked /> <span>${t('app.allowRot')}</span></label>
       <label class="field" style="margin-top:10px"><span>${t('app.mirror')}</span>
         <select id="mirrorMode">

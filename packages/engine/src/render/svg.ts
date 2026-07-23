@@ -165,7 +165,7 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
       const contour = placementContour(part, placement);
       const color = colorFor(placement.partId);
       svg.push(
-        `<path d="${contourPath(contour, ox, oy)}" fill="${color}" fill-opacity="0.85" fill-rule="evenodd" stroke="${color}" stroke-width="${stroke}"/>`,
+        `<path d="${contourPath(contour, ox, oy)}" fill="${color}" fill-rule="evenodd"/>`,
       );
     }
 

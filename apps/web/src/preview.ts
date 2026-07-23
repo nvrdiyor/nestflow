@@ -46,11 +46,7 @@ export function previewSvg(parts: Part[]): string {
     const color = colorFor(box.part.id);
     let d = ringPath(box.part.contour.outer, dx, dy);
     for (const hole of box.part.contour.holes) d += ' ' + ringPath(hole, dx, dy);
-    svg.push(
-      `<path d="${d}" fill="${color}" fill-opacity="0.82" fill-rule="evenodd" stroke="${color}" stroke-width="${(
-        maxW * 0.006
-      ).toFixed(2)}"/>`,
-    );
+    svg.push(`<path d="${d}" fill="${color}" fill-rule="evenodd"/>`);
     x += box.w + gap;
     rowH = Math.max(rowH, box.h);
     totalW = Math.max(totalW, x - gap);
