@@ -15,6 +15,9 @@ export interface GreedyOptions {
   holeFilling: boolean;
   objective: PackObjective;
   cache: NfpCache;
+  /** Called after every instance is processed — a liveness heartbeat so a UI
+   *  watchdog can tell "one slow evaluation" apart from a genuine wedge. */
+  onTick?: () => void;
 }
 
 export interface GreedyResult {
@@ -195,6 +198,7 @@ export function greedyPlace(
       }
     }
 
+    opts.onTick?.();
     if (!placed) {
       if (sheets.length >= sheetLimit) {
         result.unplaced.push({ partId: inst.part.id, instance: inst.instance, reason: 'sheet-limit' });

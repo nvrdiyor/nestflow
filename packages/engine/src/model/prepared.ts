@@ -106,13 +106,38 @@ export class PreparedPart {
     this.netArea = contourArea(part.contour);
   }
 
-  /** All (rotationIndex, mirror) orientation options for this part. */
+  private optionsCache: Array<{ rotation: number; mirror: boolean }> | null = null;
+
+  /**
+   * All (rotation, mirror) orientation options, memoised and DEDUPED by the
+   * resulting geometry: for symmetric glyphs (I, O, H, N, S, Z, X, plain bars)
+   * 180° reproduces 0° exactly, so half the orientations — and half the NFP
+   * combinations the search must compute — vanish. This method sits in the
+   * placement hot loop, so rebuilding the array on every call was also waste.
+   */
   orientationOptions(): Array<{ rotation: number; mirror: boolean }> {
+    if (this.optionsCache) return this.optionsCache;
     const options: Array<{ rotation: number; mirror: boolean }> = [];
+    const seen = new Set<string>();
+    const signature = (rotation: number, mirror: boolean): string => {
+      const c = this.oriented(rotation, mirror);
+      const b = c.bounds;
+      const parts: string[] = [];
+      for (const p of c.rawOuter) parts.push(`${(p.x - b.minX).toFixed(1)},${(p.y - b.minY).toFixed(1)}`);
+      parts.push('|');
+      for (const h of c.holes) for (const p of h) parts.push(`${(p.x - b.minX).toFixed(1)},${(p.y - b.minY).toFixed(1)}`);
+      return parts.join(';');
+    };
     for (const rotation of this.rotations) {
-      options.push({ rotation, mirror: false });
-      if (this.mirror) options.push({ rotation, mirror: true });
+      for (const mirror of this.mirror ? [false, true] : [false]) {
+        const sig = signature(rotation, mirror);
+        if (!seen.has(sig)) {
+          seen.add(sig);
+          options.push({ rotation, mirror });
+        }
+      }
     }
+    this.optionsCache = options;
     return options;
   }
 

@@ -43,7 +43,16 @@ export function runSearch(
   const params = paramsForStrategy(strategy, timeLimitMs);
   const startTime = now();
   const deadline = startTime + params.timeLimitMs;
-  const ctx: EvalContext = { instances, greedyOpts, sheetArea };
+  // Per-part liveness tick inside every greedy evaluation: a cold-cache first
+  // evaluation of a 150-letter job can take minutes, and without this the UI
+  // watchdog saw total silence and killed a healthy run.
+  const tickedOpts = {
+    ...greedyOpts,
+    onTick: () => {
+      if (onProgress) onProgress(Math.min(1, (now() - startTime) / Math.max(1, params.timeLimitMs)), Number.NaN);
+    },
+  };
+  const ctx: EvalContext = { instances, greedyOpts: tickedOpts, sheetArea };
 
   let iterations = 0;
   const report = (fitness: number): void => {
