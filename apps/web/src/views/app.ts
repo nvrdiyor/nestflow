@@ -266,8 +266,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // and engine reports can only push it FORWARD, never back.
   // Bigger jobs get a bigger search budget: heavy real-size letter sets spend
   // seconds just warming the NFP cache, and an 8s cap left "1 layouts" tried.
+  // The user prioritises pack quality over wall-clock: big jobs get up to 90s
+  // of search (progress stays live via per-part heartbeats, so waiting is safe).
   const searchBudgetMs = (): number =>
-    Math.min(40_000, 8000 + Math.max(0, instanceCount(currentParts()) - 8) * 700);
+    Math.min(90_000, 8000 + Math.max(0, instanceCount(currentParts()) - 8) * 900);
   let SEARCH_MS = 8000;
   const veil = el('progressVeil');
   const veilPct = el('progressPct');
