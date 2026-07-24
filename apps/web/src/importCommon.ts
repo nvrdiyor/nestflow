@@ -37,6 +37,77 @@ export interface ImportResult {
 }
 
 /**
+ * Drops sheet-frame rectangles from a ring soup: a near-exact axis-aligned
+ * rectangle spanning ~the whole drawing that encloses several other rings is a
+ * drawn sheet border (CorelDRAW page frames, our own exported `frame` layer) —
+ * importing it as a part swallows every letter inside it as a "hole" and the
+ * whole layout fuses into one giant plate.
+ */
+export function dropSheetFrames(rings: Ring[]): { rings: Ring[]; dropped: number } {
+  if (rings.length < 4) return { rings, dropped: 0 };
+  const boxes = rings.map((r) => {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const p of r) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    return { minX, minY, maxX, maxY, w: maxX - minX, h: maxY - minY };
+  });
+  let gMinX = Infinity;
+  let gMinY = Infinity;
+  let gMaxX = -Infinity;
+  let gMaxY = -Infinity;
+  for (const b of boxes) {
+    gMinX = Math.min(gMinX, b.minX);
+    gMinY = Math.min(gMinY, b.minY);
+    gMaxX = Math.max(gMaxX, b.maxX);
+    gMaxY = Math.max(gMaxY, b.maxY);
+  }
+  const gArea = Math.max(1e-9, (gMaxX - gMinX) * (gMaxY - gMinY));
+  const inside = (o: (typeof boxes)[number], b: (typeof boxes)[number]): boolean =>
+    o.minX >= b.minX - 1e-6 && o.maxX <= b.maxX + 1e-6 && o.minY >= b.minY - 1e-6 && o.maxY <= b.maxY + 1e-6;
+  const keep: Ring[] = [];
+  let dropped = 0;
+  for (let i = 0; i < rings.length; i++) {
+    const b = boxes[i]!;
+    const area = Math.abs(ringArea(rings[i]!));
+    // Candidate: a large, near-exact rectangle. (Parts outside the frame — the
+    // friend's stray T/L bars — must not disqualify it, so no global-span test.)
+    const isRectangle = area >= b.w * b.h * 0.96;
+    const isLarge = b.w * b.h >= gArea * 0.25;
+    if (isRectangle && isLarge) {
+      const contained: Array<(typeof boxes)[number]> = [];
+      for (let j = 0; j < boxes.length; j++) {
+        if (j !== i && inside(boxes[j]!, b)) contained.push(boxes[j]!);
+      }
+      // The decisive signal: the rectangle holds MANY rings including a nested
+      // pair (a letter with its counter). A plain plate with drilled holes has
+      // no nested pairs inside and is kept as a real part.
+      let nestedPair = false;
+      outer: for (const a of contained) {
+        for (const o of contained) {
+          if (o !== a && inside(o, a)) {
+            nestedPair = true;
+            break outer;
+          }
+        }
+      }
+      if (contained.length >= 5 && nestedPair) {
+        dropped++;
+        continue;
+      }
+    }
+    keep.push(rings[i]!);
+  }
+  return { rings: keep, dropped };
+}
+
+/**
  * A point guaranteed to lie INSIDE the ring's material. The centroid is NOT
  * that: a concave letter's centroid sits in its mouth, and when the source
  * layout interlocks letters (a rotated U nested into another U — exactly how

@@ -1,5 +1,5 @@
 import type { Point, Ring } from '@nestflow/engine';
-import { contoursToParts, dedupeRepeatedParts, ringsToContours, type ImportResult } from './importCommon';
+import { contoursToParts, dedupeRepeatedParts, dropSheetFrames, ringsToContours, type ImportResult } from './importCommon';
 import { sampleBspline } from './bspline';
 
 /**
@@ -226,6 +226,9 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
 
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi]!;
+    // Our own exports put the sheet boundary on a `frame` layer — never a part.
+    const layer = g.pairs.find((pr) => pr.code === 8)?.value ?? '';
+    if (layer.toLowerCase() === 'frame') continue;
     switch (g.type) {
       case 'LINE': {
         const x1 = first(g.pairs, 10);
@@ -382,6 +385,13 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
     rings.push(...chained.rings);
   }
   const openCount = chained.openChains.length;
+
+  const frameScan = dropSheetFrames(rings);
+  if (frameScan.dropped > 0) {
+    rings.length = 0;
+    rings.push(...frameScan.rings);
+    warnings.push('Sheet frame rectangle ignored.');
+  }
 
   // DXF is Y-up, our mm frame is Y-down: flip vertically inside the drawing's
   // own bbox so shapes (and especially text) come in upright, not mirrored.

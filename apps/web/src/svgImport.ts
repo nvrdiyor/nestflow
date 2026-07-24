@@ -1,6 +1,6 @@
 import type { Contour, Part, Point, Ring } from '@nestflow/engine';
 import { pointInRing, ringArea, ringCentroid } from '@nestflow/engine';
-import { contoursToParts, dedupeRepeatedParts, innerPointOf, ringsToContours, type ImportResult, type VectorSource } from './importCommon';
+import { contoursToParts, dedupeRepeatedParts, dropSheetFrames, innerPointOf, ringsToContours, type ImportResult, type VectorSource } from './importCommon';
 import { identity, invert, multiply, scaled, type Mat } from './matrix';
 
 /**
@@ -173,6 +173,18 @@ export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
   }
 
   if (allParts.length === 0) warnings.push('No usable closed shapes were found. Open paths and text are skipped.');
+  // Drop drawn page/sheet borders before hole grouping (they swallow the layout).
+  const frameScan = dropSheetFrames(allParts.map((pt) => pt.contour.outer));
+  if (frameScan.dropped > 0) {
+    const keepSet = new Set(frameScan.rings);
+    for (const pt of [...allParts]) {
+      if (!keepSet.has(pt.contour.outer)) {
+        sources.delete(pt.id);
+        allParts.splice(allParts.indexOf(pt), 1);
+      }
+    }
+    warnings.push('Sheet frame rectangle ignored.');
+  }
   const grouped = groupNestedElements(allParts, sources);
   const deduped = dedupeRepeatedParts(grouped, sources);
   return { parts: deduped, warnings, sources };
