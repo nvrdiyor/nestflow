@@ -245,6 +245,27 @@ export function contoursToParts(
   const sources = new Map<string, VectorSource>();
   const fineContours = new Map<string, Contour>();
   lastFinalizeTol = 0;
+
+  // Image-to-DXF converters trace BOTH sides of each stroke, so every letter
+  // arrives as a hollow shell (a hole covering >=85% of its outer). Shells have
+  // ~zero area — the preview looks empty, utilization reads 0.0% and the nest
+  // packs phantom outlines that overlap once drawn solid. When MOST of the file
+  // shows this signature (>=5 contours and >=30%), flatten the shells to solid
+  // shapes. A lone genuine thin frame among normal parts is left untouched.
+  const isShell = (c: Contour): boolean => {
+    const outerA = Math.abs(ringArea(c.outer));
+    if (outerA <= 0) return false;
+    return c.holes.some((h) => Math.abs(ringArea(h)) >= outerA * 0.85);
+  };
+  const shellCount = contours.filter(isShell).length;
+  if (shellCount >= 5 && shellCount >= contours.length * 0.3) {
+    for (const c of contours) {
+      const outerA = Math.abs(ringArea(c.outer));
+      c.holes = c.holes.filter((h) => Math.abs(ringArea(h)) < outerA * 0.85);
+    }
+    warnings.push('Double-outline (traced) contours flattened to solid shapes.');
+  }
+
   let idx = startIndex;
   for (const c of contours) {
     const outer = finalizeRing(c.outer, mmPerUnit, toleranceMm);
