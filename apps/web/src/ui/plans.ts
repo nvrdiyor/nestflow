@@ -25,13 +25,53 @@ export const salesLink = (contact: string, text = ''): string =>
  * signed in, their name and @username are added so the admin finds the
  * account in /admin at once.
  */
-export function buyText(plan: 'PRO' | 'VIP', price: number, user: ApiUser | null = null): string {
-  const lines = [t('plan.buyMsg', { plan, price: fmtSum(price), site: location.hostname })];
+export function buyText(plan: 'PRO' | 'VIP', price: number, user: ApiUser | null = null, months = 1): string {
+  const lines = [t('plan.buyMsg', { plan, months, total: fmtSum(price * months), site: location.hostname })];
   if (user) {
     const who = `${user.name}${user.telegram ? ` (@${user.telegram})` : ''}`;
     lines.push(t('plan.buyMsgAccount', { who }));
   }
   return lines.join('\n');
+}
+
+/** Subscription periods offered to buyers (months). */
+export const PERIODS = [1, 3, 6, 12];
+
+/** Segmented 1 / 3 / 6 / 12-month picker; pair it with {@link wirePeriods}. */
+export function periodPickerMarkup(): string {
+  const buttons = PERIODS.map(
+    (m, i) => `<button type="button" data-m="${m}" class="${i === 0 ? 'active' : ''}">${t('plan.monthsN', { n: m })}</button>`,
+  ).join('');
+  return `<div class="pl-period js-period" role="group" aria-label="${t('plan.periodLabel')}">${buttons}</div>`;
+}
+
+/**
+ * Wires the period picker inside `scope`: every `.js-total[data-plan]` shows
+ * the total for the chosen period and every `.js-buy[data-plan]` link carries
+ * a Telegram draft naming the plan, the months and the total.
+ */
+export function wirePeriods(scope: HTMLElement, cfg: PublicConfig, user: ApiUser | null): void {
+  let months = PERIODS[0]!;
+  const priceOf = (plan: string | undefined): number => (plan === 'VIP' ? cfg.plans.vip.price : cfg.plans.pro.price);
+  const apply = (): void => {
+    scope.querySelectorAll<HTMLButtonElement>('.js-period button').forEach((b) => {
+      b.classList.toggle('active', Number(b.dataset.m) === months);
+    });
+    scope.querySelectorAll<HTMLElement>('.js-total[data-plan]').forEach((el) => {
+      el.textContent = t('plan.total', { n: months, sum: fmtSum(priceOf(el.dataset.plan) * months) });
+    });
+    scope.querySelectorAll<HTMLAnchorElement>('.js-buy[data-plan]').forEach((a) => {
+      const plan = a.dataset.plan === 'VIP' ? 'VIP' : 'PRO';
+      a.href = salesLink(cfg.salesContact, buyText(plan, priceOf(plan), user, months));
+    });
+  };
+  scope.querySelectorAll<HTMLButtonElement>('.js-period button').forEach((b) => {
+    b.addEventListener('click', () => {
+      months = Number(b.dataset.m) || 1;
+      apply();
+    });
+  });
+  apply();
 }
 
 /** The user's plan in one short line ("PRO · 12.10.2026 gacha"). */
@@ -52,18 +92,21 @@ function modalMarkup(cfg: PublicConfig, user: ApiUser | null, reason: string): s
       <h2>${t('plan.modalTitle')}</h2>
       ${reason ? `<div class="plans-reason">${reason}</div>` : ''}
       ${user ? `<p class="plans-current">${t('plan.current', { plan: `<b>${escapeHtml(planLine(user))}</b>` })}</p>` : ''}
+      ${periodPickerMarkup()}
       <div class="plans-grid">
         <div class="plan-card">
           <div class="pl-name">PRO</div>
           <div class="pl-price">${fmtSum(cfg.plans.pro.price)} <small>${t('plan.perMonth')}</small></div>
+          <div class="pl-total js-total" data-plan="PRO"></div>
           <ul>${check(t('plan.proB1', { n: fmtSum(cfg.plans.pro.credits) }))}${check(t('plan.proB2'))}${check(t('plan.proB3'))}</ul>
-          <a class="btn btn-tg pl-buy" href="${salesLink(cfg.salesContact, buyText('PRO', cfg.plans.pro.price, user))}" target="_blank" rel="noopener">✈ ${t('plan.buyPro')}</a>
+          <a class="btn btn-tg pl-buy js-buy" data-plan="PRO" href="${salesLink(cfg.salesContact)}" target="_blank" rel="noopener">✈ ${t('plan.buyPro')}</a>
         </div>
         <div class="plan-card hot">
           <div class="pl-name">VIP</div>
           <div class="pl-price">${fmtSum(cfg.plans.vip.price)} <small>${t('plan.perMonth')}</small></div>
+          <div class="pl-total js-total" data-plan="VIP"></div>
           <ul>${check(t('plan.vipB1'))}${check(t('plan.vipB2'))}${check(t('plan.vipB3'))}</ul>
-          <a class="btn btn-tg pl-buy vip" href="${salesLink(cfg.salesContact, buyText('VIP', cfg.plans.vip.price, user))}" target="_blank" rel="noopener">✈ ${t('plan.buyVip')}</a>
+          <a class="btn btn-tg pl-buy vip js-buy" data-plan="VIP" href="${salesLink(cfg.salesContact)}" target="_blank" rel="noopener">✈ ${t('plan.buyVip')}</a>
         </div>
       </div>
       <p class="plans-sub">${t('plan.modalSub', { c: `<a href="${salesLink(cfg.salesContact)}" target="_blank" rel="noopener">@${contact}</a>` })}</p>
@@ -79,6 +122,7 @@ export function openPlans(user: ApiUser | null, reason = ''): void {
     host.innerHTML = modalMarkup(cfg, user, reason);
     const overlay = host.firstElementChild as HTMLElement;
     document.body.appendChild(overlay);
+    wirePeriods(overlay, cfg, user);
     const close = (): void => {
       overlay.remove();
       document.removeEventListener('keydown', onKey);

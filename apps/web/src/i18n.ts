@@ -304,10 +304,13 @@ const en: Dict = {
   'l.pBuyPro': 'Buy PRO on Telegram',
   'l.pBuyVip': 'Buy VIP on Telegram',
   'l.pBuyNote': 'Plans are bought on Telegram — write to {c}, the plan is switched on right after payment.',
-  'plan.buyMsg': "Hello! I'd like to buy the {plan} plan on {site} ({price} so'm / month).",
+  'plan.buyMsg': "Hello! I'd like to buy the {plan} plan on {site} for {months} month(s) — {total} so'm in total.",
   'plan.buyMsgAccount': 'My account: {who}',
   'plan.buyPro': 'Get PRO',
   'plan.buyVip': 'Get VIP',
+  'plan.monthsN': '{n} mo',
+  'plan.periodLabel': 'Period',
+  'plan.total': "{n} mo · {sum} so'm total",
 };
 
 const uz: Dict = {
@@ -588,10 +591,13 @@ const uz: Dict = {
   'l.pBuyPro': 'PRO ni Telegramda olish',
   'l.pBuyVip': 'VIP ni Telegramda olish',
   'l.pBuyNote': "Tariflar Telegram orqali sotiladi — {c} ga yozing, to'lovdan so'ng tarif darhol yoqiladi.",
-  'plan.buyMsg': "Assalomu alaykum! {site} saytidagi {plan} tarifini ({price} so'm / oy) sotib olmoqchiman.",
+  'plan.buyMsg': "Assalomu alaykum! {site} saytidagi {plan} tarifini {months} oyga (jami {total} so'm) sotib olmoqchiman.",
   'plan.buyMsgAccount': 'Akkauntim: {who}',
   'plan.buyPro': 'PRO ni olish',
   'plan.buyVip': 'VIP ni olish',
+  'plan.monthsN': '{n} oy',
+  'plan.periodLabel': 'Muddat',
+  'plan.total': "{n} oyga jami: {sum} so'm",
 };
 
 const ru: Dict = {
@@ -872,10 +878,13 @@ const ru: Dict = {
   'l.pBuyPro': 'Купить PRO в Telegram',
   'l.pBuyVip': 'Купить VIP в Telegram',
   'l.pBuyNote': 'Тарифы продаются в Telegram — напишите {c}, тариф включат сразу после оплаты.',
-  'plan.buyMsg': 'Здравствуйте! Хочу купить тариф {plan} на сайте {site} ({price} сум / мес).',
+  'plan.buyMsg': 'Здравствуйте! Хочу купить тариф {plan} на сайте {site} на {months} мес. (итого {total} сум).',
   'plan.buyMsgAccount': 'Мой аккаунт: {who}',
   'plan.buyPro': 'Купить PRO',
   'plan.buyVip': 'Купить VIP',
+  'plan.monthsN': '{n} мес',
+  'plan.periodLabel': 'Срок',
+  'plan.total': 'Итого за {n} мес: {sum} сум',
 };
 
 const DICTS: Record<Lang, Dict> = { en, uz, ru };

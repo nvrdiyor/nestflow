@@ -1,6 +1,6 @@
 import { isLoggedIn } from '../api';
 import { getConfig } from '../api';
-import { buyText, fmtSum, salesLink } from '../ui/plans';
+import { fmtSum, periodPickerMarkup, salesLink, wirePeriods } from '../ui/plans';
 import { langSwitchMarkup, t, wireLangSwitch } from '../i18n';
 
 type Nav = (hash: string) => void;
@@ -201,6 +201,7 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
   <section class="section" id="pricing">
     <div class="container">
       <div class="section-head rv"><h2>${t('l.priceTitle')}</h2><p>${t('l.priceSub', { n: '<span class="js-free-n">3</span>' })}</p></div>
+      <div class="rv" style="display:flex;justify-content:center">${periodPickerMarkup()}</div>
       <div class="pricing">
         <div class="price-card rv">
           <div class="pc-name">${t('l.pFreeName')}</div>
@@ -212,14 +213,16 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
           <div class="pc-pop">${t('l.popular')}</div>
           <div class="pc-name">PRO</div>
           <div class="pc-price"><span class="js-pro-price">150 000</span> <small>${t('plan.perMonth')}</small></div>
+          <div class="pl-total js-total" data-plan="PRO"></div>
           <ul>${bullet(t('plan.proB1', { n: '<span class="js-pro-credits">10 000</span>' }))}${bullet(t('plan.proB2'))}${bullet(t('plan.proB3'))}</ul>
-          <a class="btn btn-primary js-buy" data-plan="PRO" href="${salesLink('dior_react', buyText('PRO', 150_000))}" target="_blank" rel="noopener">${t('l.pBuyPro')}</a>
+          <a class="btn btn-primary js-buy" data-plan="PRO" href="${salesLink('dior_react')}" target="_blank" rel="noopener">${t('l.pBuyPro')}</a>
         </div>
         <div class="price-card rv">
           <div class="pc-name">VIP</div>
           <div class="pc-price"><span class="js-vip-price">300 000</span> <small>${t('plan.perMonth')}</small></div>
+          <div class="pl-total js-total" data-plan="VIP"></div>
           <ul>${bullet(t('plan.vipB1'))}${bullet(t('plan.vipB2'))}${bullet(t('plan.vipB3'))}</ul>
-          <a class="btn btn-glass js-buy" data-plan="VIP" href="${salesLink('dior_react', buyText('VIP', 300_000))}" target="_blank" rel="noopener">${t('l.pBuyVip')}</a>
+          <a class="btn btn-glass js-buy" data-plan="VIP" href="${salesLink('dior_react')}" target="_blank" rel="noopener">${t('l.pBuyVip')}</a>
         </div>
       </div>
       <p class="cmp-note rv">${t('l.pBuyNote', { c: '<a class="js-buy js-buy-name" href="' + salesLink('dior_react') + '" target="_blank" rel="noopener">@dior_react</a>' })}</p>
@@ -275,11 +278,11 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
     set('.js-vip-price', fmtSum(cfg.plans.vip.price));
     set('.js-pro-credits', fmtSum(cfg.plans.pro.credits));
     set('.js-buy-name', `@${cfg.salesContact}`);
-    root.querySelectorAll<HTMLAnchorElement>('.js-buy').forEach((a) => {
-      const plan = a.dataset.plan as 'PRO' | 'VIP' | undefined;
-      const price = plan === 'VIP' ? cfg.plans.vip.price : cfg.plans.pro.price;
-      a.href = salesLink(cfg.salesContact, plan ? buyText(plan, price) : '');
+    root.querySelectorAll<HTMLAnchorElement>('.js-buy:not([data-plan])').forEach((a) => {
+      a.href = salesLink(cfg.salesContact);
     });
+    const pricing = root.querySelector<HTMLElement>('#pricing');
+    if (pricing) wirePeriods(pricing, cfg, null);
   });
   root.querySelectorAll<HTMLElement>('.js-login').forEach((b) => b.addEventListener('click', go('#/login')));
   root.querySelectorAll<HTMLElement>('.js-app').forEach((b) => b.addEventListener('click', go('#/app')));
