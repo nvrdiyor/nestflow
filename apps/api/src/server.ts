@@ -119,6 +119,8 @@ const settingsSchema = z.object({
   vipPrice: z.number().int().min(0).max(100_000_000),
   proMonthlyCredits: z.number().int().min(0).max(10_000_000),
   freeNests: z.number().int().min(0).max(1000),
+  discount6: z.number().int().min(0).max(90).optional(),
+  discount12: z.number().int().min(0).max(90).optional(),
   salesContact: z
     .string()
     .trim()
@@ -143,6 +145,8 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       proMonthlyCredits: int(raw.proMonthlyCredits, d.proMonthlyCredits),
       freeNests: int(raw.freeNests, d.freeNests),
       salesContact: raw.salesContact || d.salesContact,
+      discount6: int(raw.discount6, d.discount6),
+      discount12: int(raw.discount12, d.discount12),
     };
   };
   const isUnlimited = (u: UserRow): boolean => vipAll || effectivePlan(u) === 'vip';
@@ -215,6 +219,8 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       plans: { pro: { price: s.proPrice, credits: s.proMonthlyCredits }, vip: { price: s.vipPrice } },
       freeNests: s.freeNests,
       salesContact: s.salesContact,
+      /** Percent off by period length in months (periods not listed: no discount). */
+      discounts: { '6': s.discount6, '12': s.discount12 },
     };
   });
 
@@ -374,7 +380,9 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     if (!(await requireAdmin(req, reply))) return reply;
     const parsed = settingsSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid input' });
-    db.saveSettings(Object.fromEntries(Object.entries(parsed.data).map(([k, v]) => [k, String(v)])));
+    // Keys left out (e.g. the discounts from an older panel) keep their current value.
+    const entries = Object.entries(parsed.data).filter(([, v]) => v !== undefined);
+    db.saveSettings(Object.fromEntries(entries.map(([k, v]) => [k, String(v)])));
     return settings();
   });
 

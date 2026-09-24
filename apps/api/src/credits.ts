@@ -32,10 +32,21 @@ export interface PlanSettings {
   freeNests: number;
   /** Telegram username (no @) customers write to in order to buy a plan. */
   salesContact: string;
+  /** Percent off when a plan is bought for 6 / 12 months at once. */
+  discount6: number;
+  discount12: number;
 }
 
 export function defaultSettings(): PlanSettings {
-  return { proPrice: 150_000, vipPrice: 300_000, proMonthlyCredits: 10_000, freeNests: 3, salesContact: 'dior_react' };
+  return {
+    proPrice: 150_000,
+    vipPrice: 300_000,
+    proMonthlyCredits: 10_000,
+    freeNests: 3,
+    salesContact: 'dior_react',
+    discount6: 10,
+    discount12: 20,
+  };
 }
 
 /** The plan in force right now (an expired pro/vip counts as free). */

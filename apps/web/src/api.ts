@@ -32,6 +32,9 @@ export interface PlanSettings {
   proMonthlyCredits: number;
   freeNests: number;
   salesContact: string;
+  /** Percent off for 6- and 12-month purchases. */
+  discount6: number;
+  discount12: number;
 }
 
 /** Public server configuration. */
@@ -40,6 +43,8 @@ export interface PublicConfig {
   plans: { pro: { price: number; credits: number }; vip: { price: number } };
   freeNests: number;
   salesContact: string;
+  /** Percent off by period length in months, e.g. { '6': 10, '12': 20 }. */
+  discounts: Record<string, number>;
 }
 
 export interface AdminOverview {
@@ -137,6 +142,7 @@ const FALLBACK_CONFIG: PublicConfig = {
   plans: { pro: { price: 150_000, credits: 10_000 }, vip: { price: 300_000 } },
   freeNests: 3,
   salesContact: 'dior_react',
+  discounts: { '6': 10, '12': 20 },
 };
 
 let configPromise: Promise<PublicConfig> | null = null;

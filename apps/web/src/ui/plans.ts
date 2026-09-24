@@ -25,8 +25,15 @@ export const salesLink = (contact: string, text = ''): string =>
  * signed in, their name and @username are added so the admin finds the
  * account in /admin at once.
  */
-export function buyText(plan: 'PRO' | 'VIP', price: number, user: ApiUser | null = null, months = 1): string {
-  const lines = [t('plan.buyMsg', { plan, months, total: fmtSum(price * months), site: location.hostname })];
+export function buyText(
+  plan: 'PRO' | 'VIP',
+  price: number,
+  user: ApiUser | null = null,
+  months = 1,
+  off = 0,
+): string {
+  const params = { plan, months, off, total: fmtSum(periodTotal(price, months, off)), site: location.hostname };
+  const lines = [t(off > 0 ? 'plan.buyMsgDisc' : 'plan.buyMsg', params)];
   if (user) {
     const who = `${user.name}${user.telegram ? ` (@${user.telegram})` : ''}`;
     lines.push(t('plan.buyMsgAccount', { who }));
@@ -36,6 +43,13 @@ export function buyText(plan: 'PRO' | 'VIP', price: number, user: ApiUser | null
 
 /** Subscription periods offered to buyers (months). */
 export const PERIODS = [1, 3, 6, 12];
+
+/** Percent off for buying `months` at once (admin-set; 6 and 12 months by default). */
+export const discountFor = (cfg: PublicConfig, months: number): number => cfg.discounts?.[String(months)] ?? 0;
+
+/** Price of `months` at a monthly `price` with `off` percent discount, rounded to 1 000 so'm. */
+export const periodTotal = (price: number, months: number, off: number): number =>
+  off > 0 ? Math.round((price * months * (1 - off / 100)) / 1000) * 1000 : price * months;
 
 /** Segmented 1 / 3 / 6 / 12-month picker; pair it with {@link wirePeriods}. */
 export function periodPickerMarkup(): string {
@@ -54,17 +68,27 @@ export function wirePeriods(scope: HTMLElement, cfg: PublicConfig, user: ApiUser
   let months = PERIODS[0]!;
   const priceOf = (plan: string | undefined): number => (plan === 'VIP' ? cfg.plans.vip.price : cfg.plans.pro.price);
   const apply = (): void => {
+    const off = discountFor(cfg, months);
     scope.querySelectorAll<HTMLButtonElement>('.js-period button').forEach((b) => {
       b.classList.toggle('active', Number(b.dataset.m) === months);
     });
     scope.querySelectorAll<HTMLElement>('.js-total[data-plan]').forEach((el) => {
-      el.textContent = t('plan.total', { n: months, sum: fmtSum(priceOf(el.dataset.plan) * months) });
+      const price = priceOf(el.dataset.plan);
+      const total = periodTotal(price, months, off);
+      const sum = off > 0 ? `<s>${fmtSum(price * months)}</s> ${fmtSum(total)}` : fmtSum(total);
+      el.innerHTML = t('plan.total', { n: months, sum });
     });
     scope.querySelectorAll<HTMLAnchorElement>('.js-buy[data-plan]').forEach((a) => {
       const plan = a.dataset.plan === 'VIP' ? 'VIP' : 'PRO';
-      a.href = salesLink(cfg.salesContact, buyText(plan, priceOf(plan), user, months));
+      a.href = salesLink(cfg.salesContact, buyText(plan, priceOf(plan), user, months, off));
     });
   };
+  // Discount tags on the period buttons (−10%, −20%).
+  scope.querySelectorAll<HTMLButtonElement>('.js-period button').forEach((b) => {
+    const off = discountFor(cfg, Number(b.dataset.m));
+    b.querySelector('.pl-off')?.remove();
+    if (off > 0) b.insertAdjacentHTML('beforeend', ` <span class="pl-off">−${off}%</span>`);
+  });
   scope.querySelectorAll<HTMLButtonElement>('.js-period button').forEach((b) => {
     b.addEventListener('click', () => {
       months = Number(b.dataset.m) || 1;

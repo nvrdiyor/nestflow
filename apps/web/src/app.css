@@ -475,3 +475,5 @@ table.data tr:hover td { background: rgba(255, 255, 255, .028); }
 .pl-period button:hover { color: var(--text); }
 .pl-period button.active { background: var(--grad, #6366f1); color: #fff; box-shadow: 0 6px 18px -8px rgba(99, 102, 241, .9); }
 .pl-total { font-size: 12.5px; color: #34d399; font-weight: 600; margin: -4px 0 10px; min-height: 1em; }
+.pl-off { display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 999px; font-size: 10.5px; font-weight: 700; color: #052e1a; background: #34d399; vertical-align: 1px; }
+.pl-total s { color: var(--muted); font-weight: 500; margin-right: 2px; }

@@ -133,6 +133,8 @@ async function renderDashboard(root: HTMLElement, navigate: Nav): Promise<void> 
       ${field('proMonthlyCredits', t('admin.proCredits'), s.proMonthlyCredits)}
       ${field('vipPrice', t('admin.vipPrice'), s.vipPrice)}
       ${field('freeNests', t('admin.freeNests'), s.freeNests)}
+      ${field('discount6', t('admin.discount6'), s.discount6)}
+      ${field('discount12', t('admin.discount12'), s.discount12)}
       ${field('salesContact', t('admin.salesContact'), '@' + s.salesContact, 'text')}
       <div class="admin-settings-foot">
         <span class="admin-sub js-settings-status">PRO ${fmtSum(s.proPrice)} · VIP ${fmtSum(s.vipPrice)} ${t('plan.perMonth')}</span>
@@ -217,6 +219,8 @@ async function renderDashboard(root: HTMLElement, navigate: Nav): Promise<void> 
         proMonthlyCredits: Math.round(Number(val('proMonthlyCredits'))),
         freeNests: Math.round(Number(val('freeNests'))),
         salesContact: val('salesContact'),
+        discount6: Math.round(Number(val('discount6'))),
+        discount12: Math.round(Number(val('discount12'))),
       });
       status.textContent = `${t('admin.saved')} · PRO ${fmtSum(saved.proPrice)} · VIP ${fmtSum(saved.vipPrice)} ${t('plan.perMonth')}`;
       status.style.color = 'var(--good, #34d399)';

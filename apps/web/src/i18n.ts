@@ -311,6 +311,9 @@ const en: Dict = {
   'plan.monthsN': '{n} mo',
   'plan.periodLabel': 'Period',
   'plan.total': "{n} mo · {sum} so'm total",
+  'plan.buyMsgDisc': "Hello! I'd like to buy the {plan} plan on {site} for {months} months with the {off}% discount — {total} so'm in total.",
+  'admin.discount6': '6-month discount (%)',
+  'admin.discount12': '12-month discount (%)',
 };
 
 const uz: Dict = {
@@ -598,6 +601,9 @@ const uz: Dict = {
   'plan.monthsN': '{n} oy',
   'plan.periodLabel': 'Muddat',
   'plan.total': "{n} oyga jami: {sum} so'm",
+  'plan.buyMsgDisc': "Assalomu alaykum! {site} saytidagi {plan} tarifini {months} oyga {off}% chegirma bilan (jami {total} so'm) sotib olmoqchiman.",
+  'admin.discount6': '6 oylik chegirma (%)',
+  'admin.discount12': '12 oylik chegirma (%)',
 };
 
 const ru: Dict = {
@@ -885,6 +891,9 @@ const ru: Dict = {
   'plan.monthsN': '{n} мес',
   'plan.periodLabel': 'Срок',
   'plan.total': 'Итого за {n} мес: {sum} сум',
+  'plan.buyMsgDisc': 'Здравствуйте! Хочу купить тариф {plan} на сайте {site} на {months} мес. со скидкой {off}% (итого {total} сум).',
+  'admin.discount6': 'Скидка за 6 мес (%)',
+  'admin.discount12': 'Скидка за 12 мес (%)',
 };
 
 const DICTS: Record<Lang, Dict> = { en, uz, ru };

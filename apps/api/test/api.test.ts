@@ -502,3 +502,22 @@ describe('plans managed from the admin panel', () => {
     await locked.close();
   });
 });
+
+describe('period discounts', () => {
+  it('publishes the 6 / 12-month discounts and lets the admin change them', async () => {
+    const dApp = await buildServer({ dbFile: ':memory:', jwtSecret: 'x', adminUsername: 'boss', adminPassword: 'pw', webDist: '' });
+    expect((await dApp.inject({ method: 'GET', url: '/api/config' })).json().discounts).toEqual({ '6': 10, '12': 20 });
+    const token = (
+      await dApp.inject({ method: 'POST', url: '/api/admin/login', payload: { username: 'boss', password: 'pw' } })
+    ).json().token;
+    const saved = await dApp.inject({
+      method: 'PUT',
+      url: '/api/admin/settings',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { proPrice: 150000, vipPrice: 300000, proMonthlyCredits: 10000, freeNests: 3, salesContact: 'dior_react', discount6: 15, discount12: 25 },
+    });
+    expect(saved.json()).toMatchObject({ discount6: 15, discount12: 25 });
+    expect((await dApp.inject({ method: 'GET', url: '/api/config' })).json().discounts).toEqual({ '6': 15, '12': 25 });
+    await dApp.close();
+  });
+});
