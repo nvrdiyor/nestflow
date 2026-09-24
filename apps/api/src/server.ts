@@ -8,7 +8,17 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { Db, type UserRow } from './db.js';
-import { nestCost, STRATEGIES, type Strategy } from './credits.js';
+import {
+  defaultSettings,
+  effectivePlan,
+  nestCost,
+  PLAN_MONTH_MS,
+  PLANS,
+  STRATEGIES,
+  type Plan,
+  type PlanSettings,
+  type Strategy,
+} from './credits.js';
 import { TelegramAuth, TG_EMAIL_DOMAIN, type TelegramAuthOptions } from './tgauth.js';
 import type { TgUpdate } from './telegram.js';
 
@@ -19,6 +29,7 @@ export interface ServerOptions {
   adminPassword: string;
   webDist?: string;
   corsOrigin?: boolean | string;
+  /** Credits a new account starts with (default 0 — the free plan is a few complimentary nests). */
   startingCredits?: number;
   /** Every account is VIP: nests cost 0 credits (usage is still recorded). */
   vipAll?: boolean;
@@ -43,14 +54,21 @@ interface TokenPayload {
   role: 'user' | 'admin';
 }
 
-function publicUser(u: UserRow, vip = false) {
+function publicUser(u: UserRow, vipAll: boolean, freeNests: number) {
+  const plan = effectivePlan(u);
   return {
     id: u.id,
     // Telegram-only accounts carry a placeholder address — never show it.
     email: u.email.endsWith(`@${TG_EMAIL_DOMAIN}`) ? '' : u.email,
     name: u.name,
     credits: u.credits,
-    vip,
+    /** Unlimited nesting right now (an active VIP plan, or the VIP_ALL switch). */
+    vip: vipAll || plan === 'vip',
+    plan,
+    /** When the active pro/vip plan ends (ms), 0 for free. */
+    planUntil: plan === 'free' ? 0 : u.plan_until,
+    /** Complimentary nests still available. */
+    freeLeft: Math.max(0, freeNests - u.free_used),
     /** Linked Telegram @username ('' when linked without one), null when not linked. */
     telegram: u.telegram_id ? (u.telegram_username ?? '') : null,
     nests: u.nests,
@@ -91,12 +109,45 @@ const adjustSchema = z.object({
   delta: z.number().int().min(-1_000_000).max(1_000_000),
 });
 
+const planSchema = z.object({
+  plan: z.enum(PLANS as [Plan, ...Plan[]]),
+  months: z.number().int().min(1).max(36).default(1),
+});
+
+const settingsSchema = z.object({
+  proPrice: z.number().int().min(0).max(100_000_000),
+  vipPrice: z.number().int().min(0).max(100_000_000),
+  proMonthlyCredits: z.number().int().min(0).max(10_000_000),
+  freeNests: z.number().int().min(0).max(1000),
+  salesContact: z
+    .string()
+    .trim()
+    .regex(/^@?[A-Za-z0-9_]{3,32}$/)
+    .transform((s) => s.replace(/^@/, '')),
+});
+
 export async function buildServer(opts: ServerOptions): Promise<FastifyInstance> {
   const db = new Db(opts.dbFile);
   const vipAll = opts.vipAll ?? false;
-  const priceOf = (parts: number, strategy: Strategy): number => (vipAll ? 0 : nestCost(parts, strategy));
-  const toPublic = (u: UserRow) => publicUser(u, vipAll);
-  const tg = opts.telegram ? new TelegramAuth(db, opts.telegram, opts.startingCredits ?? 100) : null;
+  const startingCredits = opts.startingCredits ?? 0;
+  const settings = (): PlanSettings => {
+    const d = defaultSettings();
+    const raw = db.settings();
+    const int = (v: string | undefined, dflt: number): number => {
+      const n = Number(v);
+      return v !== undefined && Number.isFinite(n) ? n : dflt;
+    };
+    return {
+      proPrice: int(raw.proPrice, d.proPrice),
+      vipPrice: int(raw.vipPrice, d.vipPrice),
+      proMonthlyCredits: int(raw.proMonthlyCredits, d.proMonthlyCredits),
+      freeNests: int(raw.freeNests, d.freeNests),
+      salesContact: raw.salesContact || d.salesContact,
+    };
+  };
+  const isUnlimited = (u: UserRow): boolean => vipAll || effectivePlan(u) === 'vip';
+  const toPublic = (u: UserRow) => publicUser(u, vipAll, settings().freeNests);
+  const tg = opts.telegram ? new TelegramAuth(db, opts.telegram, () => startingCredits) : null;
   const signUser = (u: UserRow): string =>
     app.jwt.sign({ sub: u.id, role: 'user' } satisfies TokenPayload, { expiresIn: '30d' });
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: opts.trustProxy ?? false });
@@ -156,8 +207,16 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   // ---------- health ----------
   app.get('/api/health', async () => ({ ok: true, uptime: process.uptime() }));
 
-  // Public client configuration (which sign-in methods exist).
-  app.get('/api/config', async () => ({ telegramBot: tg?.botUsername ?? null }));
+  // Public client configuration: sign-in methods, plan prices, where to buy.
+  app.get('/api/config', async () => {
+    const s = settings();
+    return {
+      telegramBot: tg?.botUsername ?? null,
+      plans: { pro: { price: s.proPrice, credits: s.proMonthlyCredits }, vip: { price: s.vipPrice } },
+      freeNests: s.freeNests,
+      salesContact: s.salesContact,
+    };
+  });
 
   // ---------- auth ----------
   app.post('/api/auth/register', authLimit, async (req, reply) => {
@@ -174,7 +233,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       // Anti-spam: the account is only created once a Telegram code confirms it.
       return { pending: true, ...tg.open('register', { name, email, passHash }) };
     }
-    const user = db.createUser({ email, name, passHash, credits: opts.startingCredits ?? 100 });
+    const user = db.createUser({ email, name, passHash, credits: startingCredits });
     const token = app.jwt.sign({ sub: user.id, role: 'user' } satisfies TokenPayload, { expiresIn: '30d' });
     return { token, user: toPublic(user) };
   });
@@ -227,7 +286,8 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       .object({ parts: z.number().int().min(1).max(100_000), strategy: z.enum(STRATEGIES as [Strategy, ...Strategy[]]) })
       .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid input' });
-    return { cost: priceOf(parsed.data.parts, parsed.data.strategy) };
+    const user = db.userById(payload.sub);
+    return { cost: user && isUnlimited(user) ? 0 : nestCost(parsed.data.parts) };
   });
 
   app.post('/api/nest/complete', async (req, reply) => {
@@ -236,14 +296,23 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     const parsed = chargeSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid input' });
     const { parts, strategy, sheets, utilPct } = parsed.data;
+    const user = db.userById(payload.sub);
+    if (!user) return reply.code(401).send({ error: 'Unauthorized' });
+    const meta = { parts, strategy, sheets, utilPct };
+    const done = (cost: number) => {
+      const fresh = db.userById(payload.sub)!;
+      return { ok: true, cost, credits: fresh.credits, user: toPublic(fresh) };
+    };
     // The server recomputes the price — the client-sent value is never trusted.
-    const cost = priceOf(parts, strategy);
-    const remaining = db.chargeNest(payload.sub, { parts, strategy, cost, sheets, utilPct });
-    if (remaining === null) {
-      const user = db.userById(payload.sub);
-      return reply.code(402).send({ error: 'Not enough credits.', cost, credits: user?.credits ?? 0 });
+    if (isUnlimited(user)) {
+      db.chargeNest(payload.sub, { ...meta, cost: 0 });
+      return done(0);
     }
-    return { ok: true, cost, credits: remaining };
+    const cost = nestCost(parts);
+    if (db.chargeNest(payload.sub, { ...meta, cost }) !== null) return done(cost);
+    // No credits for this job: fall back on a complimentary nest if any is left.
+    if (db.useFreeNest(payload.sub, settings().freeNests, meta) !== null) return done(0);
+    return reply.code(402).send({ error: 'Not enough credits.', code: 'no_credits', cost, credits: user.credits });
   });
 
   // ---------- admin ----------
@@ -251,7 +320,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     const parsed = adminLoginSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid input' });
     const { username, password } = parsed.data;
-    if (username !== opts.adminUsername || password !== opts.adminPassword) {
+    if (!opts.adminPassword || username !== opts.adminUsername || password !== opts.adminPassword) {
       return reply.code(401).send({ error: 'Invalid admin credentials.' });
     }
     const token = app.jwt.sign({ sub: 'admin', role: 'admin' } satisfies TokenPayload, { expiresIn: '12h' });
@@ -263,14 +332,50 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     const users = db.allUsers().map(toPublic);
     const usage = db.recentUsage(50).map((u) => ({
       at: u.at,
-      email: u.email,
+      email: u.email.endsWith(`@${TG_EMAIL_DOMAIN}`) ? '' : u.email,
+      name: u.name,
+      telegram: u.telegram_username,
       parts: u.parts,
       strategy: u.strategy,
       cost: u.cost,
       sheets: u.sheets,
       utilPct: u.util_pct,
     }));
-    return { stats: db.stats(), users, usage };
+    return { stats: db.stats(), users, usage, settings: settings() };
+  });
+
+  // Grant (or revoke) a plan by hand after payment. The same plan extends from
+  // its current end; a different plan starts now. PRO adds its monthly credits.
+  app.post('/api/admin/users/:id/plan', async (req, reply) => {
+    if (!(await requireAdmin(req, reply))) return reply;
+    const parsed = planSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: 'Invalid input' });
+    const { id } = req.params as { id: string };
+    const user = db.userById(id);
+    if (!user) return reply.code(404).send({ error: 'User not found' });
+    const { plan, months } = parsed.data;
+    if (plan === 'free') {
+      db.setPlan(id, 'free', 0);
+    } else {
+      const now = Date.now();
+      const base = effectivePlan(user, now) === plan ? user.plan_until : now;
+      db.setPlan(id, plan, base + months * PLAN_MONTH_MS);
+      if (plan === 'pro') db.adjustCredits(id, settings().proMonthlyCredits * months);
+    }
+    return { user: toPublic(db.userById(id)!) };
+  });
+
+  app.get('/api/admin/settings', async (req, reply) => {
+    if (!(await requireAdmin(req, reply))) return reply;
+    return settings();
+  });
+
+  app.put('/api/admin/settings', async (req, reply) => {
+    if (!(await requireAdmin(req, reply))) return reply;
+    const parsed = settingsSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid input' });
+    db.saveSettings(Object.fromEntries(Object.entries(parsed.data).map(([k, v]) => [k, String(v)])));
+    return settings();
   });
 
   app.post('/api/admin/users/:id/credits', async (req, reply) => {

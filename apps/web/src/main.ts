@@ -44,7 +44,15 @@ function enhance(): void {
   AOS.refreshHard();
 }
 
+/** The owner's admin panel lives at a real path: tasvirai.uz/admin. */
+const isAdminPath = (): boolean => location.pathname.replace(/\/+$/, '') === '/admin';
+
 function navigate(hash: string): void {
+  // Leaving /admin for a site view must also leave the /admin path.
+  if (isAdminPath()) {
+    location.assign('/' + hash);
+    return;
+  }
   if (location.hash === hash) route();
   else location.hash = hash;
 }
@@ -57,6 +65,12 @@ function route(): void {
   const path = (location.hash || '#/').replace(/^#/, '');
   root.innerHTML = '';
   window.scrollTo(0, 0);
+
+  if (isAdminPath()) {
+    renderAdmin(root, navigate);
+    enhance();
+    return;
+  }
 
   switch (path) {
     case '':
@@ -81,8 +95,7 @@ function route(): void {
       enhance();
       return;
     case '/admin':
-      renderAdmin(root, navigate);
-      enhance();
+      location.replace('/admin'); // old #/admin links
       return;
     default:
       location.hash = '#/';

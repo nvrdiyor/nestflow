@@ -1,5 +1,6 @@
 import { isLoggedIn } from '../api';
-import { STARTING_CREDITS } from '../cost';
+import { getConfig } from '../api';
+import { fmtSum, salesLink } from '../ui/plans';
 import { langSwitchMarkup, t, wireLangSwitch } from '../i18n';
 
 type Nav = (hash: string) => void;
@@ -107,7 +108,7 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
     `<div class="feature rv"><div class="ic"><i data-lucide="${ic}"></i></div><h3>${t(`l.f${i}t`)}</h3><p>${t(`l.f${i}d`)}</p></div>`;
   const step = (i: number): string =>
     `<div class="step rv"><div class="num">${String(i).padStart(2, '0')}</div><h4>${t(`l.s${i}t`)}</h4><p>${t(`l.s${i}d`)}</p></div>`;
-  const bullet = (txt: string): string => `<li><i data-lucide="check"></i>${txt}</li>`;
+  const bullet = (txt: string): string => `<li><i data-lucide="check"></i><span>${txt}</span></li>`;
   const faq = (i: number): string =>
     `<details class="faq-item rv"><summary>${t(`l.q${i}`)}<i data-lucide="chevron-down"></i></summary><p>${t(`l.a${i}`)}</p></details>`;
 
@@ -199,28 +200,29 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
 
   <section class="section" id="pricing">
     <div class="container">
-      <div class="section-head rv"><h2>${t('l.priceTitle')}</h2><p>${t('l.priceSub', { n: STARTING_CREDITS })}</p></div>
+      <div class="section-head rv"><h2>${t('l.priceTitle')}</h2><p>${t('l.priceSub', { n: '<span class="js-free-n">3</span>' })}</p></div>
       <div class="pricing">
         <div class="price-card rv">
           <div class="pc-name">${t('l.pFreeName')}</div>
-          <div class="pc-price">${t('l.pFreePrice')}</div>
-          <ul>${bullet(t('l.pFreeB1', { n: STARTING_CREDITS }))}${bullet(t('l.pFreeB2'))}${bullet(t('l.pFreeB3'))}</ul>
+          <div class="pc-price">0 <small>${t('plan.perMonth')}</small></div>
+          <ul>${bullet(t('l.pFreeB1', { n: '<span class="js-free-n">3</span>' }))}${bullet(t('l.pFreeB2'))}${bullet(t('l.pFreeB3'))}</ul>
           <button class="btn btn-glass js-start-p">${t('l.pFreeCta')}</button>
         </div>
         <div class="price-card hot rv">
           <div class="pc-pop">${t('l.popular')}</div>
-          <div class="pc-name">${t('l.pUseName')}</div>
-          <div class="pc-price">${t('l.pUsePrice')}</div>
-          <ul>${bullet(t('l.pUseB1'))}${bullet(t('l.pUseB2'))}${bullet(t('l.pUseB3'))}</ul>
-          <button class="btn btn-primary js-start-p">${t('l.pUseCta')}</button>
+          <div class="pc-name">PRO</div>
+          <div class="pc-price"><span class="js-pro-price">150 000</span> <small>${t('plan.perMonth')}</small></div>
+          <ul>${bullet(t('plan.proB1', { n: '<span class="js-pro-credits">10 000</span>' }))}${bullet(t('plan.proB2'))}${bullet(t('plan.proB3'))}</ul>
+          <a class="btn btn-primary js-buy" href="${salesLink('dior_react')}" target="_blank" rel="noopener">${t('l.pBuyPro')}</a>
         </div>
         <div class="price-card rv">
-          <div class="pc-name">${t('l.pEntName')}</div>
-          <div class="pc-price">${t('l.pEntPrice')}</div>
-          <ul>${bullet(t('l.pEntB1'))}${bullet(t('l.pEntB2'))}${bullet(t('l.pEntB3'))}</ul>
-          <a class="btn btn-glass" href="${GITHUB}/issues" target="_blank" rel="noopener">${t('l.pEntCta')}</a>
+          <div class="pc-name">VIP</div>
+          <div class="pc-price"><span class="js-vip-price">300 000</span> <small>${t('plan.perMonth')}</small></div>
+          <ul>${bullet(t('plan.vipB1'))}${bullet(t('plan.vipB2'))}${bullet(t('plan.vipB3'))}</ul>
+          <a class="btn btn-glass js-buy" href="${salesLink('dior_react')}" target="_blank" rel="noopener">${t('l.pBuyVip')}</a>
         </div>
       </div>
+      <p class="cmp-note rv">${t('l.pBuyNote', { c: '<a class="js-buy js-buy-name" href="' + salesLink('dior_react') + '" target="_blank" rel="noopener">@dior_react</a>' })}</p>
     </div>
   </section>
 
@@ -260,7 +262,23 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
     e.preventDefault();
     navigate(h);
   };
-  root.querySelectorAll<HTMLElement>('.js-start, .js-start-p').forEach((b) => b.addEventListener('click', go('#/register')));
+  root.querySelectorAll<HTMLElement>('.js-start, .js-start-p').forEach((b) => b.addEventListener('click', go('#/login')));
+  // Live prices and the sales contact come from the admin's plan settings.
+  void getConfig().then((cfg) => {
+    const set = (sel: string, text: string): void => {
+      root.querySelectorAll<HTMLElement>(sel).forEach((n) => {
+        n.textContent = text;
+      });
+    };
+    set('.js-free-n', String(cfg.freeNests));
+    set('.js-pro-price', fmtSum(cfg.plans.pro.price));
+    set('.js-vip-price', fmtSum(cfg.plans.vip.price));
+    set('.js-pro-credits', fmtSum(cfg.plans.pro.credits));
+    set('.js-buy-name', `@${cfg.salesContact}`);
+    root.querySelectorAll<HTMLAnchorElement>('.js-buy').forEach((a) => {
+      a.href = salesLink(cfg.salesContact);
+    });
+  });
   root.querySelectorAll<HTMLElement>('.js-login').forEach((b) => b.addEventListener('click', go('#/login')));
   root.querySelectorAll<HTMLElement>('.js-app').forEach((b) => b.addEventListener('click', go('#/app')));
   root.querySelectorAll<HTMLElement>('.js-home').forEach((b) => b.addEventListener('click', go('#/')));

@@ -38,12 +38,8 @@ try {
   } else if (bot) {
     app.log.error('TELEGRAM_BOT_TOKEN is set but the bot could not be reached — Telegram sign-in is OFF.');
   }
-  if (env.adminPasswordIsDefault) {
-    app.log.warn(
-      'ADMIN_PASSWORD is not set — the admin panel is using the DEFAULT password ' +
-        'committed to the repository. Set ADMIN_PASSWORD (and ADMIN_USERNAME) in ' +
-        'the environment before exposing this server to the internet.',
-    );
+  if (!env.adminPassword) {
+    app.log.warn('ADMIN_PASSWORD is not set — the admin panel (/admin) is locked until it is.');
   }
 } catch (err) {
   app.log.error(err);

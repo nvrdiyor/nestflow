@@ -30,6 +30,11 @@ export interface UserRow {
   /** Linked Telegram user id (one site account per Telegram account). */
   telegram_id: string | null;
   telegram_username: string | null;
+  /** Subscription granted by the admin: 'free' | 'pro' | 'vip' (active while plan_until > now). */
+  plan: string;
+  plan_until: number;
+  /** Complimentary nests already used (the free plan allows a few). */
+  free_used: number;
 }
 
 /** A pending Telegram confirmation (login or email sign-up), keyed by a secret nonce. */
@@ -116,6 +121,10 @@ export class Db {
     );
     if (!cols.has('telegram_id')) this.db.exec('ALTER TABLE users ADD COLUMN telegram_id TEXT');
     if (!cols.has('telegram_username')) this.db.exec('ALTER TABLE users ADD COLUMN telegram_username TEXT');
+    if (!cols.has('plan')) this.db.exec("ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'");
+    if (!cols.has('plan_until')) this.db.exec('ALTER TABLE users ADD COLUMN plan_until INTEGER NOT NULL DEFAULT 0');
+    if (!cols.has('free_used')) this.db.exec('ALTER TABLE users ADD COLUMN free_used INTEGER NOT NULL DEFAULT 0');
+    this.db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
     this.db.exec(
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_id) WHERE telegram_id IS NOT NULL',
     );
@@ -141,6 +150,9 @@ export class Db {
       nests: 0,
       telegram_id: fields.telegramId ?? null,
       telegram_username: fields.telegramUsername ?? null,
+      plan: 'free',
+      plan_until: 0,
+      free_used: 0,
     };
     this.db
       .prepare(
@@ -159,6 +171,25 @@ export class Db {
         row.telegram_username,
       );
     return row;
+  }
+
+  /** Sets a user's subscription (the admin grants plans by hand). */
+  setPlan(userId: string, plan: string, until: number): UserRow | undefined {
+    this.db.prepare('UPDATE users SET plan = ?, plan_until = ? WHERE id = ?').run(plan, until, userId);
+    return this.userById(userId);
+  }
+
+  /** All admin-editable settings as raw strings. */
+  settings(): Record<string, string> {
+    const rows = this.db.prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>;
+    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  }
+
+  saveSettings(values: Record<string, string>): void {
+    const stmt = this.db.prepare(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    );
+    for (const [k, v] of Object.entries(values)) stmt.run(k, v);
   }
 
   userByTelegram(tgId: string): UserRow | undefined {
@@ -230,6 +261,28 @@ export class Db {
     return user ? user.credits : null;
   }
 
+  /**
+   * Spends one complimentary nest if any are left (atomic, like chargeNest):
+   * records a zero-cost usage row and returns the complimentary nests used so
+   * far — or null when the allowance is exhausted.
+   */
+  useFreeNest(
+    userId: string,
+    allowance: number,
+    meta: { parts: number; strategy: string; sheets: number; utilPct: number },
+  ): number | null {
+    const result = this.db
+      .prepare(
+        'UPDATE users SET free_used = free_used + 1, nests = nests + 1, last_active = ? WHERE id = ? AND free_used < ?',
+      )
+      .run(Date.now(), userId, allowance);
+    if (Number(result.changes) === 0) return null;
+    this.db
+      .prepare('INSERT INTO usage (id, user_id, at, parts, strategy, cost, sheets, util_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(randomId(), userId, Date.now(), meta.parts, meta.strategy, 0, meta.sheets, meta.utilPct);
+    return this.userById(userId)?.free_used ?? null;
+  }
+
   /** Admin: adds (or removes, negative delta) credits; never below zero. */
   adjustCredits(userId: string, delta: number): number | null {
     this.db
@@ -243,12 +296,12 @@ export class Db {
     return this.db.prepare('SELECT * FROM users ORDER BY last_active DESC').all() as unknown as UserRow[];
   }
 
-  recentUsage(limit = 50): Array<UsageRow & { email: string }> {
+  recentUsage(limit = 50): Array<UsageRow & { email: string; name: string; telegram_username: string | null }> {
     return this.db
       .prepare(
-        'SELECT usage.*, users.email AS email FROM usage JOIN users ON users.id = usage.user_id ORDER BY usage.at DESC LIMIT ?',
+        'SELECT usage.*, users.email AS email, users.name AS name, users.telegram_username AS telegram_username FROM usage JOIN users ON users.id = usage.user_id ORDER BY usage.at DESC LIMIT ?',
       )
-      .all(limit) as unknown as Array<UsageRow & { email: string }>;
+      .all(limit) as unknown as Array<UsageRow & { email: string; name: string; telegram_username: string | null }>;
   }
 
   stats(): { users: number; activeToday: number; nests: number; creditsUsed: number } {

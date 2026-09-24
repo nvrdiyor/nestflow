@@ -10,12 +10,26 @@ export function initials(name: string): string {
   return (a + b).toUpperCase() || '?';
 }
 
+/**
+ * The plan pill in the app nav — VIP ∞, PRO with its credits, or the free
+ * nests left. It is a button: clicking it opens the plans dialog.
+ */
+export function pillMarkup(user: ApiUser): string {
+  if (user.vip) return `<button class="credits-pill vip js-plans" type="button" title="VIP"><b>VIP</b> ∞</button>`;
+  if (user.plan === 'pro') {
+    const low = user.credits <= 100 ? ' low' : '';
+    return `<button class="credits-pill pro${low} js-plans" type="button"><b>PRO</b> · ${user.credits} ${t('nav.credits')}</button>`;
+  }
+  if (user.credits > 0) {
+    return `<button class="credits-pill js-plans" type="button"><b>${user.credits}</b> ${t('nav.credits')}</button>`;
+  }
+  const left = user.freeLeft ?? 0;
+  return `<button class="credits-pill${left ? '' : ' low'} js-plans" type="button">${t('plan.pillFree', { n: `<b>${left}</b>` })}</button>`;
+}
+
 /** Top navigation for the authenticated app view. */
 export function appNavMarkup(user: ApiUser): string {
-  const low = !user.vip && user.credits <= 10 ? ' low' : '';
-  const pill = user.vip
-    ? `<span class="credits-pill vip" title="VIP"><b>VIP</b> ∞</span>`
-    : `<span class="credits-pill${low}"><b class="js-credits">${user.credits}</b> ${t('nav.credits')}</span>`;
+  const pill = pillMarkup(user);
   return `
   <nav class="nav">
     <a class="brand js-home" href="#/">${LOGO()}</a>

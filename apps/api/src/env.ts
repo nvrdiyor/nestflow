@@ -77,21 +77,23 @@ export const env = {
   trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
   jwtSecret: jwtSecret(),
   dbFile: process.env.DB_FILE || join(DATA_DIR, 'nestflow.db'),
-  /** Admin credentials — override in production via env / .env. */
+  /**
+   * Admin credentials — ONLY from env / .env. There is deliberately no default
+   * password in the code (this repository is public); without ADMIN_PASSWORD
+   * the admin panel stays locked.
+   */
   adminUsername: process.env.ADMIN_USERNAME || 'nvrdiyor',
-  adminPassword: process.env.ADMIN_PASSWORD || 'd__Iyorbek7777',
-  /** True when the admin password came from the committed default, not env. */
-  adminPasswordIsDefault: !process.env.ADMIN_PASSWORD,
+  adminPassword: process.env.ADMIN_PASSWORD || '',
   /** Directory of the built frontend to serve (empty = API only). */
   webDist: process.env.WEB_DIST ?? resolve(API_ROOT, '..', 'web', 'dist'),
   corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
-  startingCredits: intEnv(process.env.STARTING_CREDITS, 100),
+  /** Credits a new account starts with (the free plan is a few complimentary nests instead). */
+  startingCredits: intEnv(process.env.STARTING_CREDITS, 0),
   /**
-   * VIP_ALL (default ON for now): every account nests for free and without
-   * limits — nothing is deducted, usage is still logged for the admin panel.
-   * Set VIP_ALL=false to switch metered credits back on.
+   * VIP_ALL=true makes EVERY account unlimited (promo switch). Off by default:
+   * accounts get free complimentary nests, then PRO / VIP granted by the admin.
    */
-  vipAll: (process.env.VIP_ALL ?? 'true').toLowerCase() !== 'false',
+  vipAll: (process.env.VIP_ALL ?? 'false').toLowerCase() === 'true',
   /**
    * Telegram sign-in bot token (from @BotFather). When set, "Continue with
    * Telegram" appears and email sign-ups need a code from the bot. Keep it in

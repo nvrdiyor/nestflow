@@ -14,7 +14,8 @@ import {
 import { importSvgParts } from '../svgImport';
 import { importDxfParts } from '../dxfImport';
 import { exportDxf } from '../exporters';
-import { appNavMarkup } from '../ui/nav';
+import { appNavMarkup, pillMarkup } from '../ui/nav';
+import { openPlans } from '../ui/plans';
 import * as api from '../api';
 import { nestCost } from '../cost';
 import { estimateSheet, fitToParts } from '../autofit';
@@ -182,7 +183,6 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const metricsEl = el('metrics');
   const importInfo = el('importInfo');
   const exportDxfBtn = el<HTMLButtonElement>('exportDxf');
-  const creditsEl = root.querySelector<HTMLElement>('.js-credits');
 
   type MirrorMode = 'off' | 'auto' | 'all';
   const mirrorMode = (): MirrorMode => (el<HTMLSelectElement>('mirrorMode').value as MirrorMode) ?? 'off';
@@ -208,7 +208,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       return c ? { ...p, contour: c } : p;
     });
   };
-  const isVip = (): boolean => api.cachedUser()?.vip === true;
+
+  /** Can the cached user run a job of `letters` without buying a plan? */
+  const canAfford = (u: api.ApiUser, letters: number): boolean =>
+    u.vip === true || u.credits >= nestCost(letters) || (u.freeLeft ?? 0) > 0;
 
   const instanceCount = (parts: Part[]): number => parts.reduce((s, p) => s + (p.quantity ?? 1), 0);
 
@@ -245,17 +248,27 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   const updateCostLabel = (): void => {
     const n = instanceCount(currentParts());
-    runBtn.textContent =
-      n && !isVip() ? `${t('app.nestLayout')} · ${nestCost(n, STRATEGY)} ${t('nav.credits')}` : t('app.nestLayout');
+    const u = api.cachedUser();
+    let suffix = '';
+    if (n && u && !u.vip) {
+      if (u.credits >= nestCost(n)) suffix = ` · ${nestCost(n)} ${t('nav.credits')}`;
+      else if ((u.freeLeft ?? 0) > 0) suffix = ` · ${t('plan.runFree', { n: u.freeLeft ?? 0 })}`;
+    }
+    runBtn.textContent = t('app.nestLayout') + suffix;
     runBtn.disabled = busy || n === 0;
   };
 
-  const updateCreditsPill = (credits: number): void => {
-    if (creditsEl && !isVip()) {
-      creditsEl.textContent = String(credits);
-      creditsEl.parentElement?.classList.toggle('low', credits <= 10);
-    }
+  // The nav plan pill: redrawn whenever the account changes; opens the plans dialog.
+  const refreshPill = (user: api.ApiUser): void => {
+    const old = root.querySelector<HTMLElement>('.credits-pill');
+    if (!old) return;
+    const holder = document.createElement('span');
+    holder.innerHTML = pillMarkup(user);
+    const pill = holder.firstElementChild as HTMLElement;
+    old.replaceWith(pill);
+    pill.addEventListener('click', () => openPlans(api.cachedUser()));
   };
+  root.querySelector('.js-plans')?.addEventListener('click', () => openPlans(api.cachedUser()));
 
   // Instant, free preview of the current parts (before a real nest is run).
   const showPreview = (label: string): void => {
@@ -395,9 +408,13 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       return;
     }
     const instances = instanceCount(parts);
-    const cost = u.vip ? 0 : nestCost(instances, STRATEGY);
-    if (u.credits < cost) {
-      statusMsg(t('app.notEnough', { cost, have: u.credits }), true);
+    const cost = u.vip ? 0 : nestCost(instances);
+    if (!canAfford(u, instances)) {
+      // Free nests used up and not enough credits: show the plans, don't compute.
+      const reason =
+        u.credits > 0 ? t('plan.notEnough', { cost, have: u.credits }) : t('plan.outOfFree');
+      statusMsg(reason, true);
+      openPlans(u, reason);
       return;
     }
     busy = true;
@@ -466,7 +483,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
           sheets: r.sheetsUsed,
           utilPct: Math.min(100, r.metrics.utilization * 100),
         });
-        updateCreditsPill(res.credits);
+        const fresh = api.cachedUser();
+        if (fresh) refreshPill(fresh);
         lastParts = ctx.parts;
       } catch (err) {
         busy = false;
@@ -475,6 +493,12 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
         updateCostLabel();
         if (err instanceof api.ApiError && err.status === 401) {
           navigate('#/login');
+          return;
+        }
+        if (err instanceof api.ApiError && err.status === 402) {
+          const reason = t('plan.outOfFree');
+          statusMsg(reason, true);
+          openPlans(api.cachedUser(), reason);
           return;
         }
         statusMsg(err instanceof api.ApiError ? err.message : t('app.chargeFail'), true);
@@ -730,14 +754,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
         navigate('#/login');
         return;
       }
-      // A stale cached session may predate VIP: redraw the pill + run label.
-      const pill = root.querySelector<HTMLElement>('.credits-pill');
-      if (fresh.vip && pill && !pill.classList.contains('vip')) {
-        pill.className = 'credits-pill vip';
-        pill.innerHTML = '<b>VIP</b> ∞';
-        updateCostLabel();
-      }
-      updateCreditsPill(fresh.credits);
+      // The cached session may be stale (a plan granted meanwhile): redraw.
+      refreshPill(fresh);
+      updateCostLabel();
     })
     .catch((err) => {
       if (err instanceof api.ApiError && err.status === 401) navigate('#/login');

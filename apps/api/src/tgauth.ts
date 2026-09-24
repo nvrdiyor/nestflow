@@ -97,9 +97,9 @@ function messages(site: string) {
             en: '✅ Account created and linked to Telegram. Welcome!',
           }[lang]
         : {
-            uz: "✅ Saytga kirish tasdiqlandi. Agar bu siz bo'lmasangiz, parolingizni almashtiring.",
-            ru: '✅ Вход на сайт подтверждён. Если это были не вы, смените пароль.',
-            en: '✅ Sign-in confirmed. If this was not you, change your password.',
+            uz: "✅ Saytga kirish tasdiqlandi. Agar bu siz bo'lmasangiz — kodni hech kimga bermang.",
+            ru: '✅ Вход на сайт подтверждён. Если это были не вы — никому не сообщайте код.',
+            en: '✅ Sign-in confirmed. If this was not you, never share your code with anyone.',
           }[lang],
   };
 }
@@ -113,7 +113,8 @@ export class TelegramAuth {
   constructor(
     private readonly db: Db,
     private readonly opts: TelegramAuthOptions,
-    private readonly startingCredits: number,
+    /** Credits a newly created account starts with. */
+    private readonly startingCredits: () => number,
   ) {
     this.ttlMs = opts.ttlMs ?? 10 * 60_000;
     this.msg = messages(opts.siteUrl ?? '');
@@ -201,7 +202,7 @@ export class TelegramAuth {
         email: p.email,
         name: p.name,
         passHash: p.passHash,
-        credits: this.startingCredits,
+        credits: this.startingCredits(),
         telegramId: tgId,
         telegramUsername: ch.tg_username,
       });
@@ -212,7 +213,7 @@ export class TelegramAuth {
         email: `tg${tgId}@${TG_EMAIL_DOMAIN}`,
         name: ch.tg_name ?? 'Telegram user',
         passHash: await bcrypt.hash(randomBytes(32).toString('hex'), 10),
-        credits: this.startingCredits,
+        credits: this.startingCredits(),
         telegramId: tgId,
         telegramUsername: ch.tg_username,
       });

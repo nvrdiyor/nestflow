@@ -32,11 +32,11 @@ async function registerUser(email = 'a@b.co'): Promise<{ token: string; user: { 
 }
 
 describe('credit pricing', () => {
-  it('matches the documented formula', () => {
-    expect(nestCost(10, 'fast')).toBe(2);
-    expect(nestCost(47, 'balanced')).toBe(7);
-    expect(nestCost(100, 'max')).toBe(13);
-    expect(nestCost(1, 'fast')).toBe(2);
+  it('charges one credit per letter / part', () => {
+    expect(nestCost(10)).toBe(10);
+    expect(nestCost(47)).toBe(47);
+    expect(nestCost(2000)).toBe(2000);
+    expect(nestCost(0)).toBe(1);
   });
 });
 
@@ -106,33 +106,36 @@ describe('nest charging', () => {
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.cost).toBe(nestCost(47, 'fast')); // 5
+    expect(body.cost).toBe(nestCost(47)); // 1 credit per letter
     expect(body.credits).toBe(100 - body.cost);
   });
 
-  it('returns 402 when the balance is insufficient and does not deduct', async () => {
+  it('uses credits, then the free nests, then answers 402 without deducting', async () => {
     const { token } = await registerUser('poor@test.co');
-    // Burn credits down: 13 credits per max/100-part job -> 7 jobs = 91, leaving 9.
-    for (let i = 0; i < 7; i++) {
-      const r = await app.inject({
+    const job = (parts: number) =>
+      app.inject({
         method: 'POST',
         url: '/api/nest/complete',
         headers: { authorization: `Bearer ${token}` },
-        payload: { parts: 100, strategy: 'max', sheets: 1, utilPct: 50 },
+        payload: { parts, strategy: 'max', sheets: 1, utilPct: 50 },
       });
+    const paid = await job(91); // 100 starting credits -> 9 left
+    expect(paid.json().cost).toBe(91);
+    // Too big for the 9 credits: the 3 complimentary nests carry it.
+    for (let i = 0; i < 3; i++) {
+      const r = await job(100);
       expect(r.statusCode).toBe(200);
+      expect(r.json().cost).toBe(0);
+      expect(r.json().user.freeLeft).toBe(2 - i);
     }
-    const broke = await app.inject({
-      method: 'POST',
-      url: '/api/nest/complete',
-      headers: { authorization: `Bearer ${token}` },
-      payload: { parts: 100, strategy: 'max', sheets: 1, utilPct: 50 },
-    });
+    const broke = await job(100);
     expect(broke.statusCode).toBe(402);
+    expect(broke.json().code).toBe('no_credits');
     expect(broke.json().credits).toBe(9); // unchanged
 
     const me = await app.inject({ method: 'GET', url: '/api/me', headers: { authorization: `Bearer ${token}` } });
     expect(me.json().user.credits).toBe(9);
+    expect(me.json().user.plan).toBe('free');
   });
 
   it('rejects a charge without auth', async () => {
@@ -300,7 +303,7 @@ describe('Telegram sign-in and sign-up confirmation', () => {
   });
 
   it('advertises the bot in /api/config', async () => {
-    expect((await tgApp.inject({ method: 'GET', url: '/api/config' })).json()).toEqual({ telegramBot: 'tasviraiauthbot' });
+    expect((await tgApp.inject({ method: 'GET', url: '/api/config' })).json()).toMatchObject({ telegramBot: 'tasviraiauthbot' });
   });
 
   it('signs in with a bot code, creating the account once and reusing it after', async () => {
@@ -388,5 +391,114 @@ describe('Telegram sign-in and sign-up confirmation', () => {
       message: { message_id: 1, chat: { id: 666, type: 'private' }, from: tgUser(666), text: 'salom' },
     });
     expect(sent.slice(before)[0]?.text).toContain('tasvirai.uz');
+  });
+});
+
+describe('plans managed from the admin panel', () => {
+  let planApp: FastifyInstance;
+  let adminToken = '';
+  beforeAll(async () => {
+    planApp = await buildServer({
+      dbFile: ':memory:',
+      jwtSecret: 'test-secret',
+      adminUsername: 'boss',
+      adminPassword: 'boss-pass',
+      webDist: '',
+    });
+    await planApp.ready();
+    adminToken = (
+      await planApp.inject({ method: 'POST', url: '/api/admin/login', payload: { username: 'boss', password: 'boss-pass' } })
+    ).json().token;
+  });
+  afterAll(async () => {
+    await planApp.close();
+  });
+  const newUser = async (email: string) =>
+    (
+      await planApp.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: { name: 'Shop', email, password: 'secret123' },
+      })
+    ).json() as { token: string; user: { id: string; credits: number; freeLeft: number; plan: string } };
+  const nestJob = (token: string, parts: number) =>
+    planApp.inject({
+      method: 'POST',
+      url: '/api/nest/complete',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { parts, strategy: 'max', sheets: 1, utilPct: 60 },
+    });
+  const grant = (id: string, plan: string, months = 1) =>
+    planApp.inject({
+      method: 'POST',
+      url: `/api/admin/users/${id}/plan`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { plan, months },
+    });
+
+  it('gives a new account exactly 3 free nests of any size', async () => {
+    const { token, user } = await newUser('free@test.co');
+    expect(user.credits).toBe(0);
+    expect(user.freeLeft).toBe(3);
+    for (let i = 0; i < 3; i++) expect((await nestJob(token, 2000)).statusCode).toBe(200);
+    expect((await nestJob(token, 1)).statusCode).toBe(402);
+  });
+
+  it('PRO adds monthly credits spent per letter; VIP is unlimited; revoking returns to free', async () => {
+    const { token, user } = await newUser('pro@test.co');
+    const pro = (await grant(user.id, 'pro', 2)).json().user;
+    expect(pro.plan).toBe('pro');
+    expect(pro.credits).toBe(20_000);
+    expect(pro.planUntil).toBeGreaterThan(Date.now() + 59 * 24 * 3600 * 1000);
+    const spent = (await nestJob(token, 500)).json();
+    expect(spent.cost).toBe(500);
+    expect(spent.credits).toBe(19_500);
+
+    const vip = (await grant(user.id, 'vip')).json().user;
+    expect(vip.plan).toBe('vip');
+    expect(vip.vip).toBe(true);
+    const free = (await nestJob(token, 50_000)).json();
+    expect(free.cost).toBe(0);
+    expect(free.credits).toBe(19_500);
+
+    const revoked = (await grant(user.id, 'free')).json().user;
+    expect(revoked.plan).toBe('free');
+    expect(revoked.vip).toBe(false);
+  });
+
+  it('saves plan settings and publishes them in /api/config', async () => {
+    const saved = await planApp.inject({
+      method: 'PUT',
+      url: '/api/admin/settings',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { proPrice: 150000, vipPrice: 300000, proMonthlyCredits: 12000, freeNests: 5, salesContact: '@dior_react' },
+    });
+    expect(saved.statusCode).toBe(200);
+    const cfg = (await planApp.inject({ method: 'GET', url: '/api/config' })).json();
+    expect(cfg).toMatchObject({
+      plans: { pro: { price: 150000, credits: 12000 }, vip: { price: 300000 } },
+      freeNests: 5,
+      salesContact: 'dior_react',
+    });
+    const { user } = await newUser('five@test.co');
+    expect(user.freeLeft).toBe(5);
+  });
+
+  it('refuses plan changes without an admin token', async () => {
+    const { token, user } = await newUser('sneaky@test.co');
+    const res = await planApp.inject({
+      method: 'POST',
+      url: `/api/admin/users/${user.id}/plan`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { plan: 'vip', months: 12 },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('keeps the admin panel locked when no admin password is configured', async () => {
+    const locked = await buildServer({ dbFile: ':memory:', jwtSecret: 'x', adminUsername: 'boss', adminPassword: '', webDist: '' });
+    const res = await locked.inject({ method: 'POST', url: '/api/admin/login', payload: { username: 'boss', password: 'x' } });
+    expect(res.statusCode).toBe(401);
+    await locked.close();
   });
 });

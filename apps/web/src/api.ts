@@ -10,8 +10,14 @@ export interface ApiUser {
   email: string;
   name: string;
   credits: number;
-  /** VIP accounts nest for free and without limits (server decides). */
+  /** Unlimited nesting right now (active VIP plan) — the server decides. */
   vip?: boolean;
+  /** Plan in force: 'free' | 'pro' | 'vip'. */
+  plan?: 'free' | 'pro' | 'vip';
+  /** When the pro/vip plan ends (ms), 0 for free. */
+  planUntil?: number;
+  /** Complimentary nests still available. */
+  freeLeft?: number;
   /** Linked Telegram @username ('' if it has none), null when not linked. */
   telegram?: string | null;
   nests: number;
@@ -19,12 +25,32 @@ export interface ApiUser {
   lastActive: number;
 }
 
+/** Admin-editable plan settings (prices in so'm). */
+export interface PlanSettings {
+  proPrice: number;
+  vipPrice: number;
+  proMonthlyCredits: number;
+  freeNests: number;
+  salesContact: string;
+}
+
+/** Public server configuration. */
+export interface PublicConfig {
+  telegramBot: string | null;
+  plans: { pro: { price: number; credits: number }; vip: { price: number } };
+  freeNests: number;
+  salesContact: string;
+}
+
 export interface AdminOverview {
   stats: { users: number; activeToday: number; nests: number; creditsUsed: number };
   users: ApiUser[];
+  settings: PlanSettings;
   usage: Array<{
     at: number;
     email: string;
+    name: string;
+    telegram: string | null;
     parts: number;
     strategy: string;
     cost: number;
@@ -106,14 +132,23 @@ export interface TgChallenge {
   expiresIn: number;
 }
 
-let configPromise: Promise<{ telegramBot: string | null }> | null = null;
+const FALLBACK_CONFIG: PublicConfig = {
+  telegramBot: null,
+  plans: { pro: { price: 150_000, credits: 10_000 }, vip: { price: 300_000 } },
+  freeNests: 3,
+  salesContact: 'dior_react',
+};
 
-/** Public server configuration (cached; a failure just hides optional features). */
-export function getConfig(): Promise<{ telegramBot: string | null }> {
-  configPromise ??= request<{ telegramBot: string | null }>('/api/config').catch(() => {
-    configPromise = null;
-    return { telegramBot: null };
-  });
+let configPromise: Promise<PublicConfig> | null = null;
+
+/** Public server configuration (cached; a failure falls back to the defaults). */
+export function getConfig(): Promise<PublicConfig> {
+  configPromise ??= request<PublicConfig>('/api/config')
+    .then((c) => ({ ...FALLBACK_CONFIG, ...c }))
+    .catch(() => {
+      configPromise = null;
+      return FALLBACK_CONFIG;
+    });
   return configPromise;
 }
 
@@ -186,13 +221,14 @@ export async function completeNest(meta: {
   strategy: string;
   sheets: number;
   utilPct: number;
-}): Promise<{ cost: number; credits: number }> {
-  const res = await request<{ ok: boolean; cost: number; credits: number }>('/api/nest/complete', {
+}): Promise<{ cost: number; credits: number; user?: ApiUser }> {
+  const res = await request<{ ok: boolean; cost: number; credits: number; user?: ApiUser }>('/api/nest/complete', {
     method: 'POST',
     body: meta,
   });
   const user = cachedUser();
-  if (user) cacheUser({ ...user, credits: res.credits, nests: user.nests + 1 });
+  if (res.user) cacheUser(res.user);
+  else if (user) cacheUser({ ...user, credits: res.credits, nests: user.nests + 1 });
   return res;
 }
 
@@ -221,6 +257,22 @@ export async function adminOverview(): Promise<AdminOverview> {
     if (err instanceof ApiError && err.status === 401) adminLogout();
     throw err;
   }
+}
+
+/** Grants (plan 'pro' | 'vip', for `months`) or revokes ('free') a user's plan. */
+export async function adminSetPlan(userId: string, plan: 'free' | 'pro' | 'vip', months = 1): Promise<ApiUser> {
+  const { user } = await request<{ user: ApiUser }>(`/api/admin/users/${userId}/plan`, {
+    method: 'POST',
+    body: { plan, months },
+    admin: true,
+  });
+  return user;
+}
+
+export async function adminSaveSettings(settings: PlanSettings): Promise<PlanSettings> {
+  const saved = await request<PlanSettings>('/api/admin/settings', { method: 'PUT', body: settings, admin: true });
+  configPromise = null; // prices changed — refetch the public config
+  return saved;
 }
 
 export async function adminAdjustCredits(userId: string, delta: number): Promise<number> {

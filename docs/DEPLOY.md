@@ -12,15 +12,15 @@ State is a single SQLite file — no external database to provision.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | **Yes — change them** | Admin panel login. Defaults are development-only. |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | **Yes** | Login for the admin panel at `/admin`. There is no default password — without `ADMIN_PASSWORD` the panel stays locked. |
 | `JWT_SECRET` | Recommended | Long random string. Auto-generated into `data/jwt-secret` if unset (fine for a single instance). |
 | `PORT` / `HOST` | No | Default `8787` / `0.0.0.0`. |
 | `TRUST_PROXY` | **Yes if behind a proxy** | `false` (default) when exposed directly. Behind Caddy/nginx/a PaaS router set the hop count (usually `1`). Wrong values let attackers spoof their IP and bypass login rate limits. |
 | `DATA_DIR` | No | Where the SQLite DB lives. **Must be persistent storage.** |
 | `CORS_ORIGIN` | No | Set to your domain if you ever host the frontend separately. |
-| `STARTING_CREDITS` | No | Free credits per new account (default 100). |
+| `STARTING_CREDITS` | No | Credits a new account starts with (default 0 — the free plan is a number of complimentary nests, set in /admin). |
 | `TELEGRAM_BOT_TOKEN` | No | Token of the sign-in bot (@BotFather). Enables “Continue with Telegram” and requires a Telegram code for every email sign-up (one Telegram account = one site account). Only one process may use a given token. |
-| `VIP_ALL` | No | `true` (default): every account is VIP — nesting is free and unlimited (usage is still logged). Set `false` to charge credits again. |
+| `VIP_ALL` | No | `false` (default). `true` is a promo switch that makes every account unlimited. Plans (free nests, PRO credits, VIP) are managed in the admin panel at `/admin`. |
 
 ## Fastest: one-command bootstrap (fresh Ubuntu/Debian VPS)
 
