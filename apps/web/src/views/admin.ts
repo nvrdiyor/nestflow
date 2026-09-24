@@ -66,8 +66,12 @@ async function renderDashboard(root: HTMLElement, navigate: Nav): Promise<void> 
     ? data.users
         .map(
           (u) => `<tr>
-      <td>${escapeHtml(u.name)}</td>
-      <td style="color:var(--muted)">${escapeHtml(u.email)}</td>
+      <td>${escapeHtml(u.name)}${
+        u.telegram != null
+          ? `<div style="color:#229ed9;font-size:12px">✈ ${u.telegram ? '@' + escapeHtml(u.telegram) : 'Telegram'}</div>`
+          : ''
+      }</td>
+      <td style="color:var(--muted)">${u.email ? escapeHtml(u.email) : '—'}</td>
       <td><b style="color:var(--accent)" data-credits="${u.id}">${u.credits}</b></td>
       <td>${u.nests}</td>
       <td style="color:var(--muted)">${fmtDate(u.createdAt)}</td>

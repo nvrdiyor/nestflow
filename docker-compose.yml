@@ -20,6 +20,9 @@ services:
       STARTING_CREDITS: ${STARTING_CREDITS:-100}
       # Everyone nests free and unlimited while true; set VIP_ALL=false in .env to meter credits.
       VIP_ALL: ${VIP_ALL:-true}
+      # Telegram sign-in bot (@BotFather token) — set in .env, never commit it.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      DOMAIN: ${DOMAIN:-}
       # Keep false in IP-only mode; set TRUST_PROXY=1 in .env when using the
       # https profile (Caddy is then the single proxy hop in front).
       TRUST_PROXY: ${TRUST_PROXY:-false}

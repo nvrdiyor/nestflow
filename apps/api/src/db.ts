@@ -27,6 +27,25 @@ export interface UserRow {
   created_at: number;
   last_active: number;
   nests: number;
+  /** Linked Telegram user id (one site account per Telegram account). */
+  telegram_id: string | null;
+  telegram_username: string | null;
+}
+
+/** A pending Telegram confirmation (login or email sign-up), keyed by a secret nonce. */
+export interface TgChallengeRow {
+  nonce: string;
+  purpose: 'login' | 'register';
+  /** register: JSON {name, email, passHash}; login: '{}'. */
+  payload: string;
+  tg_id: string | null;
+  tg_name: string | null;
+  tg_username: string | null;
+  code_hash: string | null;
+  attempts: number;
+  sends: number;
+  expires_at: number;
+  created_at: number;
 }
 
 export interface UsageRow {
@@ -77,10 +96,39 @@ export class Db {
       );
       CREATE INDEX IF NOT EXISTS idx_usage_at ON usage(at DESC);
       CREATE INDEX IF NOT EXISTS idx_usage_user ON usage(user_id);
+      CREATE TABLE IF NOT EXISTS tg_challenges (
+        nonce TEXT PRIMARY KEY,
+        purpose TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        tg_id TEXT,
+        tg_name TEXT,
+        tg_username TEXT,
+        code_hash TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        sends INTEGER NOT NULL DEFAULT 0,
+        expires_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
     `);
+    // Additive migration for databases created before Telegram sign-in.
+    const cols = new Set(
+      (this.db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!cols.has('telegram_id')) this.db.exec('ALTER TABLE users ADD COLUMN telegram_id TEXT');
+    if (!cols.has('telegram_username')) this.db.exec('ALTER TABLE users ADD COLUMN telegram_username TEXT');
+    this.db.exec(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_id) WHERE telegram_id IS NOT NULL',
+    );
   }
 
-  createUser(fields: { email: string; name: string; passHash: string; credits: number }): UserRow {
+  createUser(fields: {
+    email: string;
+    name: string;
+    passHash: string;
+    credits: number;
+    telegramId?: string;
+    telegramUsername?: string | null;
+  }): UserRow {
     const now = Date.now();
     const row: UserRow = {
       id: randomId(),
@@ -91,13 +139,64 @@ export class Db {
       created_at: now,
       last_active: now,
       nests: 0,
+      telegram_id: fields.telegramId ?? null,
+      telegram_username: fields.telegramUsername ?? null,
     };
     this.db
       .prepare(
-        'INSERT INTO users (id, email, name, pass_hash, credits, created_at, last_active, nests) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO users (id, email, name, pass_hash, credits, created_at, last_active, nests, telegram_id, telegram_username) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(row.id, row.email, row.name, row.pass_hash, row.credits, row.created_at, row.last_active, row.nests);
+      .run(
+        row.id,
+        row.email,
+        row.name,
+        row.pass_hash,
+        row.credits,
+        row.created_at,
+        row.last_active,
+        row.nests,
+        row.telegram_id,
+        row.telegram_username,
+      );
     return row;
+  }
+
+  userByTelegram(tgId: string): UserRow | undefined {
+    return this.db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(tgId) as UserRow | undefined;
+  }
+
+  setTelegramUsername(userId: string, username: string | null): void {
+    this.db.prepare('UPDATE users SET telegram_username = ?, last_active = ? WHERE id = ?').run(username, Date.now(), userId);
+  }
+
+  // ---------- Telegram confirmation challenges ----------
+
+  createChallenge(fields: { nonce: string; purpose: 'login' | 'register'; payload: string; expiresAt: number }): void {
+    this.db.prepare('DELETE FROM tg_challenges WHERE expires_at < ?').run(Date.now());
+    this.db
+      .prepare('INSERT INTO tg_challenges (nonce, purpose, payload, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(fields.nonce, fields.purpose, fields.payload, fields.expiresAt, Date.now());
+  }
+
+  challenge(nonce: string): TgChallengeRow | undefined {
+    return this.db.prepare('SELECT * FROM tg_challenges WHERE nonce = ?').get(nonce) as TgChallengeRow | undefined;
+  }
+
+  /** Binds the Telegram user who opened the bot link and stores a fresh code hash. */
+  bindChallenge(nonce: string, tg: { id: string; name: string; username: string | null }, codeHash: string): void {
+    this.db
+      .prepare(
+        'UPDATE tg_challenges SET tg_id = ?, tg_name = ?, tg_username = ?, code_hash = ?, attempts = 0, sends = sends + 1 WHERE nonce = ?',
+      )
+      .run(tg.id, tg.name, tg.username, codeHash, nonce);
+  }
+
+  bumpChallengeAttempts(nonce: string): void {
+    this.db.prepare('UPDATE tg_challenges SET attempts = attempts + 1 WHERE nonce = ?').run(nonce);
+  }
+
+  deleteChallenge(nonce: string): void {
+    this.db.prepare('DELETE FROM tg_challenges WHERE nonce = ?').run(nonce);
   }
 
   userByEmail(email: string): UserRow | undefined {

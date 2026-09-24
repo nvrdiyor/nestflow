@@ -9,6 +9,8 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { Db, type UserRow } from './db.js';
 import { nestCost, STRATEGIES, type Strategy } from './credits.js';
+import { TelegramAuth, TG_EMAIL_DOMAIN, type TelegramAuthOptions } from './tgauth.js';
+import type { TgUpdate } from './telegram.js';
 
 export interface ServerOptions {
   dbFile: string;
@@ -20,6 +22,11 @@ export interface ServerOptions {
   startingCredits?: number;
   /** Every account is VIP: nests cost 0 credits (usage is still recorded). */
   vipAll?: boolean;
+  /**
+   * Telegram sign-in bot. When set, "Continue with Telegram" is offered and
+   * every email sign-up must be confirmed with a code from the bot.
+   */
+  telegram?: TelegramAuthOptions;
   logger?: boolean;
   /**
    * Proxy trust for client-IP resolution (rate-limit buckets key on req.ip).
@@ -39,10 +46,13 @@ interface TokenPayload {
 function publicUser(u: UserRow, vip = false) {
   return {
     id: u.id,
-    email: u.email,
+    // Telegram-only accounts carry a placeholder address — never show it.
+    email: u.email.endsWith(`@${TG_EMAIL_DOMAIN}`) ? '' : u.email,
     name: u.name,
     credits: u.credits,
     vip,
+    /** Linked Telegram @username ('' when linked without one), null when not linked. */
+    telegram: u.telegram_id ? (u.telegram_username ?? '') : null,
     nests: u.nests,
     createdAt: u.created_at,
     lastActive: u.last_active,
@@ -72,6 +82,11 @@ const adminLoginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
+const tgVerifySchema = z.object({
+  nonce: z.string().regex(/^[a-f0-9]{32}$/),
+  code: z.string().trim().regex(/^\d{6}$/),
+});
+
 const adjustSchema = z.object({
   delta: z.number().int().min(-1_000_000).max(1_000_000),
 });
@@ -81,6 +96,9 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   const vipAll = opts.vipAll ?? false;
   const priceOf = (parts: number, strategy: Strategy): number => (vipAll ? 0 : nestCost(parts, strategy));
   const toPublic = (u: UserRow) => publicUser(u, vipAll);
+  const tg = opts.telegram ? new TelegramAuth(db, opts.telegram, opts.startingCredits ?? 100) : null;
+  const signUser = (u: UserRow): string =>
+    app.jwt.sign({ sub: u.id, role: 'user' } satisfies TokenPayload, { expiresIn: '30d' });
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: opts.trustProxy ?? false });
 
   await app.register(cors, { origin: opts.corsOrigin ?? true });
@@ -106,6 +124,9 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   });
 
   app.decorate('db', db);
+  app.decorate('handleTelegramUpdate', async (u: TgUpdate) => {
+    await tg?.onUpdate(u);
+  });
   app.addHook('onClose', async () => db.close());
 
   const requireUser = async (req: FastifyRequest, reply: FastifyReply): Promise<TokenPayload | null> => {
@@ -135,6 +156,9 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
   // ---------- health ----------
   app.get('/api/health', async () => ({ ok: true, uptime: process.uptime() }));
 
+  // Public client configuration (which sign-in methods exist).
+  app.get('/api/config', async () => ({ telegramBot: tg?.botUsername ?? null }));
+
   // ---------- auth ----------
   app.post('/api/auth/register', authLimit, async (req, reply) => {
     const parsed = registerSchema.safeParse(req.body);
@@ -146,6 +170,10 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       return reply.code(409).send({ error: 'An account with this email already exists.' });
     }
     const passHash = await bcrypt.hash(password, 10);
+    if (tg) {
+      // Anti-spam: the account is only created once a Telegram code confirms it.
+      return { pending: true, ...tg.open('register', { name, email, passHash }) };
+    }
     const user = db.createUser({ email, name, passHash, credits: opts.startingCredits ?? 100 });
     const token = app.jwt.sign({ sub: user.id, role: 'user' } satisfies TokenPayload, { expiresIn: '30d' });
     return { token, user: toPublic(user) };
@@ -163,6 +191,25 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     const token = app.jwt.sign({ sub: user.id, role: 'user' } satisfies TokenPayload, { expiresIn: '30d' });
     return { token, user: toPublic({ ...user, last_active: Date.now() }) };
   });
+
+  // ---------- Telegram sign-in / sign-up confirmation ----------
+  app.post('/api/auth/telegram/start', authLimit, async (_req, reply) => {
+    if (!tg) return reply.code(503).send({ error: 'Telegram sign-in is not configured.', code: 'tg_unavailable' });
+    return tg.open('login');
+  });
+
+  app.post(
+    '/api/auth/telegram/verify',
+    { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      if (!tg) return reply.code(503).send({ error: 'Telegram sign-in is not configured.', code: 'tg_unavailable' });
+      const parsed = tgVerifySchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: 'Wrong code.', code: 'tg_bad_code' });
+      const res = await tg.verify(parsed.data.nonce, parsed.data.code);
+      if (!res.ok) return reply.code(res.status).send({ error: res.error, code: res.code });
+      return { token: signUser(res.user), user: toPublic(res.user), created: res.created };
+    },
+  );
 
   app.get('/api/me', async (req, reply) => {
     const payload = await requireUser(req, reply);
@@ -271,5 +318,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
 declare module 'fastify' {
   interface FastifyInstance {
     db: Db;
+    /** Feeds one Telegram bot update (from long polling) into the sign-in flow. */
+    handleTelegramUpdate: (u: TgUpdate) => Promise<void>;
   }
 }

@@ -92,4 +92,12 @@ export const env = {
    * Set VIP_ALL=false to switch metered credits back on.
    */
   vipAll: (process.env.VIP_ALL ?? 'true').toLowerCase() !== 'false',
+  /**
+   * Telegram sign-in bot token (from @BotFather). When set, "Continue with
+   * Telegram" appears and email sign-ups need a code from the bot. Keep it in
+   * .env only — never commit it.
+   */
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
+  /** Public site URL used in bot messages (from DOMAIN when not given). */
+  publicUrl: process.env.PUBLIC_URL || (process.env.DOMAIN ? `https://${process.env.DOMAIN}` : ''),
 } as const;

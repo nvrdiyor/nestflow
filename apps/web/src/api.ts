@@ -12,6 +12,8 @@ export interface ApiUser {
   credits: number;
   /** VIP accounts nest for free and without limits (server decides). */
   vip?: boolean;
+  /** Linked Telegram @username ('' if it has none), null when not linked. */
+  telegram?: string | null;
   nests: number;
   createdAt: number;
   lastActive: number;
@@ -96,10 +98,54 @@ export function isLoggedIn(): boolean {
   return !!localStorage.getItem(K_TOKEN);
 }
 
-export async function register(name: string, email: string, password: string): Promise<ApiUser> {
-  const { token, user } = await request<{ token: string; user: ApiUser }>('/api/auth/register', {
+/** A pending Telegram confirmation: open `link`, press START, type the bot's code. */
+export interface TgChallenge {
+  nonce: string;
+  bot: string;
+  link: string;
+  expiresIn: number;
+}
+
+let configPromise: Promise<{ telegramBot: string | null }> | null = null;
+
+/** Public server configuration (cached; a failure just hides optional features). */
+export function getConfig(): Promise<{ telegramBot: string | null }> {
+  configPromise ??= request<{ telegramBot: string | null }>('/api/config').catch(() => {
+    configPromise = null;
+    return { telegramBot: null };
+  });
+  return configPromise;
+}
+
+/**
+ * Email sign-up. With Telegram configured the server answers with a pending
+ * confirmation instead of an account — finish it with telegramVerify().
+ */
+export async function register(
+  name: string,
+  email: string,
+  password: string,
+): Promise<{ user: ApiUser } | { pending: TgChallenge }> {
+  const res = await request<({ token: string; user: ApiUser } & { pending?: false }) | ({ pending: true } & TgChallenge)>(
+    '/api/auth/register',
+    { method: 'POST', body: { name, email, password } },
+  );
+  if (res.pending) return { pending: { nonce: res.nonce, bot: res.bot, link: res.link, expiresIn: res.expiresIn } };
+  localStorage.setItem(K_TOKEN, res.token);
+  cacheUser(res.user);
+  return { user: res.user };
+}
+
+/** Starts "Continue with Telegram". */
+export function telegramStart(): Promise<TgChallenge> {
+  return request<TgChallenge>('/api/auth/telegram/start', { method: 'POST', body: {} });
+}
+
+/** Finishes a Telegram confirmation with the 6-digit code from the bot; signs in. */
+export async function telegramVerify(nonce: string, code: string): Promise<ApiUser> {
+  const { token, user } = await request<{ token: string; user: ApiUser }>('/api/auth/telegram/verify', {
     method: 'POST',
-    body: { name, email, password },
+    body: { nonce, code },
   });
   localStorage.setItem(K_TOKEN, token);
   cacheUser(user);

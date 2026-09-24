@@ -358,6 +358,14 @@ i[data-lucide], svg.lucide { width: 1em; height: 1em; display: inline-block; ver
 .auth-error { background: rgba(248, 113, 113, .12); border: 1px solid rgba(248, 113, 113, .32); color: #fca5a5; font-size: 13px; padding: 11px 13px; border-radius: 10px; margin-bottom: 14px; }
 .auth-alt { text-align: center; margin-top: 18px; font-size: 13px; color: var(--muted); }
 .auth-alt a { color: var(--accent); cursor: pointer; font-weight: 550; }
+.auth-or { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+.auth-or::before, .auth-or::after { content: ''; flex: 1; height: 1px; background: var(--line-2); }
+.btn-tg { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 10px; background: #229ed9; color: #fff; border: 0; text-decoration: none; }
+.btn-tg:hover { background: #1b8cc2; }
+.btn-tg:disabled { opacity: .6; cursor: default; }
+.tg-steps { margin: 0 0 16px; padding-left: 20px; color: var(--text); font-size: 14px; line-height: 1.6; }
+.tg-steps li { margin: 2px 0; }
+.tg-code { text-align: center; font-size: 26px; font-weight: 650; letter-spacing: .5em; padding-left: .5em; font-variant-numeric: tabular-nums; }
 .auth-back { position: absolute; top: 24px; left: 24px; font-size: 13px; color: var(--muted); cursor: pointer; transition: color .15s; }
 .auth-back:hover { color: var(--text); }
 
