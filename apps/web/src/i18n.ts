@@ -269,7 +269,7 @@ const en: Dict = {
   'plan.until': 'until {date}',
   'plan.runFree': 'free ({n} left)',
   'plan.modalTitle': 'Choose a plan',
-  'plan.modalSub': 'Plans are switched on by the admin right after payment. To buy, write on Telegram:',
+  'plan.modalSub': 'The button opens a Telegram chat with {c} with your message ready — just press Send. The plan is switched on right after payment.',
   'plan.outOfFree': 'Your free nests are used up — choose PRO or VIP to continue.',
   'plan.notEnough': 'Not enough credits: this job needs {cost}, you have {have}. Choose PRO or VIP.',
   'plan.perMonth': "so'm / month",
@@ -304,6 +304,10 @@ const en: Dict = {
   'l.pBuyPro': 'Buy PRO on Telegram',
   'l.pBuyVip': 'Buy VIP on Telegram',
   'l.pBuyNote': 'Plans are bought on Telegram — write to {c}, the plan is switched on right after payment.',
+  'plan.buyMsg': "Hello! I'd like to buy the {plan} plan on {site} ({price} so'm / month).",
+  'plan.buyMsgAccount': 'My account: {who}',
+  'plan.buyPro': 'Get PRO',
+  'plan.buyVip': 'Get VIP',
 };
 
 const uz: Dict = {
@@ -549,7 +553,7 @@ const uz: Dict = {
   'plan.until': '{date} gacha',
   'plan.runFree': 'bepul ({n} ta qoldi)',
   'plan.modalTitle': 'Tarifni tanlang',
-  'plan.modalSub': "Tarif to'lovdan so'ng admin tomonidan darhol yoqiladi. Sotib olish uchun Telegramga yozing:",
+  'plan.modalSub': "Tugmani bosing — {c} bilan Telegram chat tayyor xabar bilan ochiladi, faqat «Yuborish»ni bosing. To'lovdan so'ng tarif darhol yoqiladi.",
   'plan.outOfFree': 'Bepul nestinglar tugadi — davom etish uchun PRO yoki VIP tarifni tanlang.',
   'plan.notEnough': 'Kredit yetmaydi: bu ish uchun {cost} kerak, sizda {have} bor. PRO yoki VIP tarifni tanlang.',
   'plan.perMonth': "so'm / oy",
@@ -584,6 +588,10 @@ const uz: Dict = {
   'l.pBuyPro': 'PRO ni Telegramda olish',
   'l.pBuyVip': 'VIP ni Telegramda olish',
   'l.pBuyNote': "Tariflar Telegram orqali sotiladi — {c} ga yozing, to'lovdan so'ng tarif darhol yoqiladi.",
+  'plan.buyMsg': "Assalomu alaykum! {site} saytidagi {plan} tarifini ({price} so'm / oy) sotib olmoqchiman.",
+  'plan.buyMsgAccount': 'Akkauntim: {who}',
+  'plan.buyPro': 'PRO ni olish',
+  'plan.buyVip': 'VIP ni olish',
 };
 
 const ru: Dict = {
@@ -829,7 +837,7 @@ const ru: Dict = {
   'plan.until': 'до {date}',
   'plan.runFree': 'бесплатно (осталось {n})',
   'plan.modalTitle': 'Выберите тариф',
-  'plan.modalSub': 'Тариф включает администратор сразу после оплаты. Для покупки напишите в Telegram:',
+  'plan.modalSub': 'Кнопка откроет чат с {c} в Telegram с готовым сообщением — просто нажмите «Отправить». Тариф включат сразу после оплаты.',
   'plan.outOfFree': 'Бесплатные раскрои закончились — выберите PRO или VIP.',
   'plan.notEnough': 'Недостаточно кредитов: нужно {cost}, у вас {have}. Выберите PRO или VIP.',
   'plan.perMonth': 'сум / мес',
@@ -864,6 +872,10 @@ const ru: Dict = {
   'l.pBuyPro': 'Купить PRO в Telegram',
   'l.pBuyVip': 'Купить VIP в Telegram',
   'l.pBuyNote': 'Тарифы продаются в Telegram — напишите {c}, тариф включат сразу после оплаты.',
+  'plan.buyMsg': 'Здравствуйте! Хочу купить тариф {plan} на сайте {site} ({price} сум / мес).',
+  'plan.buyMsgAccount': 'Мой аккаунт: {who}',
+  'plan.buyPro': 'Купить PRO',
+  'plan.buyVip': 'Купить VIP',
 };
 
 const DICTS: Record<Lang, Dict> = { en, uz, ru };

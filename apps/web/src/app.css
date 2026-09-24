@@ -443,7 +443,10 @@ table.data tr:hover td { background: rgba(255, 255, 255, .028); }
 .plan-card ul { list-style: none; margin: 0; padding: 0; font-size: 13.5px; line-height: 1.8; }
 .pl-check { color: #34d399; margin-right: 7px; font-weight: 700; }
 .plans-sub { text-align: center; color: var(--muted); font-size: 13px; margin: 18px 0 10px; }
-.plans-buy { font-size: 15px; padding: 12px; }
+.pl-buy { width: 100%; margin-top: 14px; padding: 11px; font-size: 14px; }
+.pl-buy.vip { background: linear-gradient(90deg, #f59e0b, #fbbf24); color: #1a1204; }
+.pl-buy.vip:hover { filter: brightness(1.06); background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.plans-sub a { color: #38bdf8; font-weight: 600; }
 .btn-tg-lg { padding: 14px; font-size: 15px; margin-top: 4px; }
 .pc-price small { font-size: 13px; color: var(--muted); font-weight: 500; }
 

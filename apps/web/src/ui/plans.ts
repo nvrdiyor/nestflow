@@ -13,7 +13,26 @@ export function fmtDay(ts: number): string {
   }
 }
 
-export const salesLink = (contact: string): string => `https://t.me/${encodeURIComponent(contact)}`;
+/**
+ * Telegram chat link to the seller. With `text`, Telegram opens the chat with
+ * that message already typed in the input box (official `t.me/<user>?text=`).
+ */
+export const salesLink = (contact: string, text = ''): string =>
+  `https://t.me/${encodeURIComponent(contact)}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
+
+/**
+ * The ready-made "I want to buy …" message for a plan. When the buyer is
+ * signed in, their name and @username are added so the admin finds the
+ * account in /admin at once.
+ */
+export function buyText(plan: 'PRO' | 'VIP', price: number, user: ApiUser | null = null): string {
+  const lines = [t('plan.buyMsg', { plan, price: fmtSum(price), site: location.hostname })];
+  if (user) {
+    const who = `${user.name}${user.telegram ? ` (@${user.telegram})` : ''}`;
+    lines.push(t('plan.buyMsgAccount', { who }));
+  }
+  return lines.join('\n');
+}
 
 /** The user's plan in one short line ("PRO · 12.10.2026 gacha"). */
 export function planLine(user: ApiUser): string {
@@ -38,15 +57,16 @@ function modalMarkup(cfg: PublicConfig, user: ApiUser | null, reason: string): s
           <div class="pl-name">PRO</div>
           <div class="pl-price">${fmtSum(cfg.plans.pro.price)} <small>${t('plan.perMonth')}</small></div>
           <ul>${check(t('plan.proB1', { n: fmtSum(cfg.plans.pro.credits) }))}${check(t('plan.proB2'))}${check(t('plan.proB3'))}</ul>
+          <a class="btn btn-tg pl-buy" href="${salesLink(cfg.salesContact, buyText('PRO', cfg.plans.pro.price, user))}" target="_blank" rel="noopener">✈ ${t('plan.buyPro')}</a>
         </div>
         <div class="plan-card hot">
           <div class="pl-name">VIP</div>
           <div class="pl-price">${fmtSum(cfg.plans.vip.price)} <small>${t('plan.perMonth')}</small></div>
           <ul>${check(t('plan.vipB1'))}${check(t('plan.vipB2'))}${check(t('plan.vipB3'))}</ul>
+          <a class="btn btn-tg pl-buy vip" href="${salesLink(cfg.salesContact, buyText('VIP', cfg.plans.vip.price, user))}" target="_blank" rel="noopener">✈ ${t('plan.buyVip')}</a>
         </div>
       </div>
-      <p class="plans-sub">${t('plan.modalSub')}</p>
-      <a class="btn btn-tg plans-buy" href="${salesLink(cfg.salesContact)}" target="_blank" rel="noopener">✈ ${t('plan.buy', { c: contact })}</a>
+      <p class="plans-sub">${t('plan.modalSub', { c: `<a href="${salesLink(cfg.salesContact)}" target="_blank" rel="noopener">@${contact}</a>` })}</p>
     </div>
   </div>`;
 }
