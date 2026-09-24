@@ -1,7 +1,7 @@
 import type { ApiUser } from '../api';
 import { langSwitchMarkup, t } from '../i18n';
 
-const LOGO = (): string => `<span class="logo">◧</span><div>NestFlow&nbsp;AI<small>${t('brand.tag')}</small></div>`;
+const LOGO = (): string => `<span class="logo">◧</span><div>Tasvir&nbsp;AI<small>${t('brand.tag')}</small></div>`;
 
 export function initials(name: string): string {
   const parts = name.trim().split(/\s+/);

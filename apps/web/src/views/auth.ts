@@ -14,7 +14,7 @@ function shell(root: HTMLElement, navigate: Nav, inner: string): void {
     <span class="auth-back js-home">${t('nav.back')}</span>
     <div style="position:absolute;top:18px;right:20px">${langSwitchMarkup()}</div>
     <div class="auth-card">
-      <div class="brand"><span class="logo">◧</span><div>NestFlow&nbsp;AI</div></div>
+      <div class="brand"><span class="logo">◧</span><div>Tasvir&nbsp;AI</div></div>
       ${inner}
     </div>
   </div>`;

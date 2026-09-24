@@ -25,7 +25,7 @@ export function exportSvg(
   partSvg?: (partId: string, placement: NestResult['placements'][number]) => string | null,
 ): void {
   download(
-    'nestflow-layout.svg',
+    'tasvirai-layout.svg',
     resultToSVG(result, parts, {
       ...(partSvg ? { partSvg } : {}),
       labels: false,
@@ -46,7 +46,7 @@ export function exportSvg(
  * operator sees the plate outline and can hide/skip the layer when cutting.
  */
 export function exportDxf(result: NestResult, parts: Part[], fineContours?: Map<string, Contour>): void {
-  download('nestflow-layout.dxf', buildDxf(result, parts, fineContours), 'application/dxf');
+  download('tasvirai-layout.dxf', buildDxf(result, parts, fineContours), 'application/dxf');
 }
 
 /** The DXF text of a nested layout (pure — no DOM), see {@link exportDxf}. */

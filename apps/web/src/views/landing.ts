@@ -17,7 +17,7 @@ const heroWindow = (): string => `
   <div class="mock-window" id="mockWin">
     <div class="mw-bar">
       <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
-      <span class="mw-title">NestFlow — Sheet 1</span>
+      <span class="mw-title">Tasvir AI — Sheet 1</span>
       <span class="mw-chips"><i>Lazer 1210×900</i><i>2 mm</i><i>Max</i></span>
     </div>
     <div class="mw-body">
@@ -115,7 +115,7 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
   root.innerHTML = `
   <nav class="lnav" id="lnav">
     <div class="container lnav-in">
-      <a class="brand js-home" href="#/"><span class="logo">◧</span><div>NestFlow&nbsp;AI</div></a>
+      <a class="brand js-home" href="#/"><span class="logo">◧</span><div>Tasvir&nbsp;AI</div></a>
       <div class="lnav-links">
         <a data-goto="features">${t('l.navFeatures')}</a>
         <a data-goto="pricing">${t('l.navPricing')}</a>
@@ -240,7 +240,7 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
     <div class="container">
       <div class="f2-grid">
         <div class="f2-brand">
-          <a class="brand js-home" href="#/"><span class="logo">◧</span><div>NestFlow&nbsp;AI</div></a>
+          <a class="brand js-home" href="#/"><span class="logo">◧</span><div>Tasvir&nbsp;AI</div></a>
           <p>${t('l.footDesc')}</p>
         </div>
         <div class="f2-col">

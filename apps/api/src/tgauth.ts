@@ -55,15 +55,15 @@ function messages(site: string) {
   return {
     code: (lang: Lang, code: string): string =>
       ({
-        uz: `🔐 NestFlow tasdiqlash kodi: <code>${code}</code>\n\nKodni saytdagi oynaga kiriting. 10 daqiqa amal qiladi.\nKodni hech kimga bermang.`,
-        ru: `🔐 Код подтверждения NestFlow: <code>${code}</code>\n\nВведите его на сайте. Код действует 10 минут.\nНикому не сообщайте этот код.`,
-        en: `🔐 NestFlow verification code: <code>${code}</code>\n\nEnter it on the website. It is valid for 10 minutes.\nNever share this code.`,
+        uz: `🔐 Tasvir AI tasdiqlash kodi: <code>${code}</code>\n\nKodni saytdagi oynaga kiriting. 10 daqiqa amal qiladi.\nKodni hech kimga bermang.`,
+        ru: `🔐 Код подтверждения Tasvir AI: <code>${code}</code>\n\nВведите его на сайте. Код действует 10 минут.\nНикому не сообщайте этот код.`,
+        en: `🔐 Tasvir AI verification code: <code>${code}</code>\n\nEnter it on the website. It is valid for 10 minutes.\nNever share this code.`,
       })[lang],
     help: (lang: Lang): string =>
       ({
-        uz: `Salom! Bu bot NestFlow saytiga${onSite.uz} kirish va ro'yxatdan o'tishni tasdiqlaydi.\nSaytda «Telegram orqali kirish» tugmasini bosing.`,
-        ru: `Здравствуйте! Этот бот подтверждает вход и регистрацию на сайте NestFlow${onSite.ru}.\nНажмите на сайте «Войти через Telegram».`,
-        en: `Hi! This bot confirms sign-in and sign-up on NestFlow${onSite.en}.\nPress “Continue with Telegram” on the website.`,
+        uz: `Salom! Bu bot Tasvir AI saytiga${onSite.uz} kirish va ro'yxatdan o'tishni tasdiqlaydi.\nSaytda «Telegram orqali kirish» tugmasini bosing.`,
+        ru: `Здравствуйте! Этот бот подтверждает вход и регистрацию на сайте Tasvir AI${onSite.ru}.\nНажмите на сайте «Войти через Telegram».`,
+        en: `Hi! This bot confirms sign-in and sign-up on Tasvir AI${onSite.en}.\nPress “Continue with Telegram” on the website.`,
       })[lang],
     expired: (lang: Lang): string =>
       ({

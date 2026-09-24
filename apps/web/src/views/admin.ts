@@ -19,7 +19,7 @@ function renderLogin(root: HTMLElement, navigate: Nav): void {
     <span class="auth-back js-home">${t('nav.back')}</span>
     <div style="position:absolute;top:18px;right:20px">${langSwitchMarkup()}</div>
     <div class="auth-card">
-      <div class="brand"><span class="logo">◧</span><div>NestFlow&nbsp;AI</div></div>
+      <div class="brand"><span class="logo">◧</span><div>Tasvir&nbsp;AI</div></div>
       <h1>${t('auth.adminTitle')}</h1>
       <p class="sub">${t('auth.adminSub')}</p>
       <div class="auth-error hidden js-error"></div>
