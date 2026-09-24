@@ -127,6 +127,8 @@ i[data-lucide], svg.lucide { width: 1em; height: 1em; display: inline-block; ver
 }
 .credits-pill b { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .credits-pill.low b { -webkit-text-fill-color: var(--warn); color: var(--warn); }
+.credits-pill.vip { border-color: rgba(251, 191, 36, 0.45); }
+.credits-pill.vip b { background: linear-gradient(90deg, #fbbf24, #f59e0b); -webkit-background-clip: text; background-clip: text; color: transparent; letter-spacing: 0.04em; }
 .user-chip { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .avatar {
   width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;

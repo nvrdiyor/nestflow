@@ -86,4 +86,10 @@ export const env = {
   webDist: process.env.WEB_DIST ?? resolve(API_ROOT, '..', 'web', 'dist'),
   corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
   startingCredits: intEnv(process.env.STARTING_CREDITS, 100),
+  /**
+   * VIP_ALL (default ON for now): every account nests for free and without
+   * limits — nothing is deducted, usage is still logged for the admin panel.
+   * Set VIP_ALL=false to switch metered credits back on.
+   */
+  vipAll: (process.env.VIP_ALL ?? 'true').toLowerCase() !== 'false',
 } as const;

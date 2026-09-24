@@ -208,3 +208,48 @@ describe('admin', () => {
     expect(drain.json().credits).toBe(0);
   });
 });
+
+describe('VIP_ALL mode', () => {
+  let vipApp: FastifyInstance;
+  beforeAll(async () => {
+    vipApp = await buildServer({
+      dbFile: ':memory:',
+      jwtSecret: 'test-secret',
+      adminUsername: 'admin',
+      adminPassword: 'admin-pass',
+      startingCredits: 5,
+      vipAll: true,
+      webDist: '',
+    });
+    await vipApp.ready();
+  });
+  afterAll(async () => {
+    await vipApp.close();
+  });
+
+  it('marks users VIP and nests huge jobs for free, still logging usage', async () => {
+    const reg = await vipApp.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { name: 'Vip', email: 'vip@test.co', password: 'secret123' },
+    });
+    const { token, user } = reg.json();
+    expect(user.vip).toBe(true);
+    const charge = await vipApp.inject({
+      method: 'POST',
+      url: '/api/nest/complete',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { parts: 2000, strategy: 'max', sheets: 10, utilPct: 58 },
+    });
+    expect(charge.statusCode).toBe(200);
+    expect(charge.json().cost).toBe(0);
+    expect(charge.json().credits).toBe(5); // nothing deducted
+    const admin = await vipApp.inject({ method: 'POST', url: '/api/admin/login', payload: { username: 'admin', password: 'admin-pass' } });
+    const overview = await vipApp.inject({
+      method: 'GET',
+      url: '/api/admin/overview',
+      headers: { authorization: `Bearer ${admin.json().token}` },
+    });
+    expect(overview.json().usage[0].parts).toBe(2000);
+  });
+});

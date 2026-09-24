@@ -1,20 +1,26 @@
 import { placementContour, ringBounds, type NestResult, type Part } from '@nestflow/engine';
 
 /**
- * Estimates a square sheet generous enough to hold the parts on a single sheet
- * (used in "fit sheet to parts" mode so the nester clusters everything, then we
- * crop the sheet to the packed bounding box).
+ * Estimates a sheet generous enough to hold the parts on a single sheet (used
+ * in "fit sheet to parts" mode, then the sheet is cropped to the pack). The
+ * nester fills full-width rows from the top, so the width is set near the
+ * square root of the parts' area and the height left generous — the cropped
+ * result comes out roughly square instead of one long thin strip.
  */
 export function estimateSheet(parts: Part[]): { width: number; height: number } {
   let sum = 0;
+  let maxDim = 0;
   for (const p of parts) {
     const b = ringBounds(p.contour.outer);
     const w = b.maxX - b.minX;
     const h = b.maxY - b.minY;
     sum += w * h * (p.quantity ?? 1);
+    maxDim = Math.max(maxDim, w, h);
   }
-  const side = Math.max(50, Math.ceil(Math.sqrt(Math.max(1, sum)) * 2.2));
-  return { width: side, height: side };
+  const root = Math.sqrt(Math.max(1, sum));
+  const width = Math.max(50, Math.ceil(Math.max(maxDim * 1.05 + 10, root * 1.25)));
+  const height = Math.max(50, Math.ceil(Math.max(maxDim * 1.05 + 10, (sum * 3) / width)));
+  return { width, height };
 }
 
 /**

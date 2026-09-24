@@ -12,13 +12,16 @@ export function initials(name: string): string {
 
 /** Top navigation for the authenticated app view. */
 export function appNavMarkup(user: ApiUser): string {
-  const low = user.credits <= 10 ? ' low' : '';
+  const low = !user.vip && user.credits <= 10 ? ' low' : '';
+  const pill = user.vip
+    ? `<span class="credits-pill vip" title="VIP"><b>VIP</b> ∞</span>`
+    : `<span class="credits-pill${low}"><b class="js-credits">${user.credits}</b> ${t('nav.credits')}</span>`;
   return `
   <nav class="nav">
     <a class="brand js-home" href="#/">${LOGO()}</a>
     <div class="nav-right">
       ${langSwitchMarkup()}
-      <span class="credits-pill${low}"><b class="js-credits">${user.credits}</b> ${t('nav.credits')}</span>
+      ${pill}
       <span class="user-chip"><span class="avatar">${initials(user.name)}</span><span class="uname">${escapeHtml(user.name)}</span></span>
       <button class="btn btn-ghost js-logout">${t('nav.logout')}</button>
     </div>

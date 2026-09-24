@@ -21,9 +21,9 @@ for a shipped feature.
 
 | Area | State |
 | --- | --- |
-| **`@nestflow/engine`** — NFP/Minkowski geometry, GA + simulated annealing, hole filling, multi-sheet, metrics, SVG render | ✅ **Implemented, 39 passing tests, runnable demo + benchmark** |
+| **`@nestflow/engine`** — raster band engine (thousands of parts, exact true-contour spacing) + classic NFP/Minkowski engine, hole filling, multi-sheet, metrics, SVG render | ✅ **Implemented, 54 passing tests, runnable demo + benchmark** |
 | **`apps/web`** — full web app: landing page, email/password auth, credit-metered nesting tool, admin dashboard | ✅ **Runnable — `npm run dev`** |
-| **`apps/api`** — backend (Fastify + built-in SQLite + JWT): server-side auth, atomic credit charging, admin API; serves the built app in production | ✅ **12 passing tests** |
+| **`apps/api`** — backend (Fastify + built-in SQLite + JWT): server-side auth, atomic credit charging (VIP_ALL = free for everyone), admin API; serves the built app in production | ✅ **13 passing tests** |
 | **File import — SVG + DXF** (browser): curves/arcs/bulges flattened, holes detected, loops chained | ✅ In the app |
 | **Text → letters** — type a word, cut its glyphs (counters/holes detected, tight nesting) | ✅ In the app |
 | **Common-line cutting** — detect shared edges (cut once), optimise cut order (NN + 2-opt), savings metric | ✅ Engine + app |
@@ -60,7 +60,7 @@ nestflow/
 ```bash
 npm install
 npm run dev                          # API (:8787) + web app (:5173) together
-npm test                             # engine (47 tests) + API (12 tests)
+npm test                             # engine (54 tests) + API (13 tests)
 npm run build && npm start           # production: one process serves app + API
 npm run engine:demo                  # nest a sample job -> SVG files
 ```

@@ -12,8 +12,16 @@ import {
 
 import { multiply, translate, type Mat } from './matrix';
 
-export const MAX_PARTS = 400;
-export const MIN_PART_AREA_MM2 = 1;
+/**
+ * Safety valve only — the raster nester handles thousands of parts, and a cap
+ * that drops shapes is worse than useless: contours are sorted big-to-small,
+ * so it silently deleted exactly the SMALL details of big files.
+ */
+export const MAX_PARTS = 20000;
+/** Slivers below this are drawing noise, not cuttable parts (0.45 × 0.45 mm). */
+export const MIN_PART_AREA_MM2 = 0.2;
+/** Fine (export/nesting) contours drop only points within this of the kept outline. */
+export const FINE_TOLERANCE_MM = 0.01;
 export const SIMPLIFY_TOLERANCE_MM = 0.2;
 
 /** Original vector geometry of a part, for exact (curve-preserving) rendering/export. */
@@ -31,9 +39,27 @@ export interface ImportResult {
   sources?: Map<string, VectorSource>;
   /** Per-part finely-sampled contour (mm) for high-fidelity DXF export. */
   fineContours?: Map<string, Contour>;
-  /** Max simplification deviation (mm) of the nesting polygons — callers add
-   *  this to the spacing so TRUE geometry can never end up closer than asked. */
+  /** Max simplification deviation (mm) of the light preview polygons. */
   simplifyTolMm?: number;
+  /** Overall drawing size in mm (all parts as laid out in the file). */
+  size?: { w: number; h: number };
+}
+
+/** Overall bounding-box size of parts as they sit in the file (before per-part normalisation). */
+export function overallSize(parts: Part[]): { w: number; h: number } | undefined {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const part of parts) {
+    for (const p of part.contour.outer) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+  return Number.isFinite(minX) ? { w: maxX - minX, h: maxY - minY } : undefined;
 }
 
 /**
@@ -146,6 +172,20 @@ export function innerPointOf(ring: Ring): { x: number; y: number } {
   return ringCentroid(ring);
 }
 
+function boxOf(ring: Ring): { minX: number; minY: number; maxX: number; maxY: number } {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of ring) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
 /**
  * Groups rings into contours by even-odd containment depth of each ring's
  * INTERIOR point: even depth = a part's outer, odd depth = a hole of its
@@ -155,7 +195,7 @@ export function innerPointOf(ring: Ring): { x: number; y: number } {
 export function ringsToContours(rings: Ring[]): Contour[] {
   const valid = rings
     .filter((r) => r.length >= 3 && Math.abs(ringArea(r)) > 1e-6)
-    .map((r) => ({ ring: r, area: Math.abs(ringArea(r)), probe: innerPointOf(r) }))
+    .map((r) => ({ ring: r, area: Math.abs(ringArea(r)), probe: innerPointOf(r), box: boxOf(r) }))
     .sort((a, b) => b.area - a.area);
 
   const contours: Contour[] = [];
@@ -163,8 +203,13 @@ export function ringsToContours(rings: Ring[]): Contour[] {
   for (let i = 0; i < valid.length; i++) {
     let depth = 0;
     let innermost = -1;
+    const probe = valid[i]!.probe;
     for (let j = 0; j < i; j++) {
-      if (pointInRing(valid[i]!.probe, valid[j]!.ring)) {
+      // Bounding-box reject first: thousands of rings would otherwise cost
+      // n² full point-in-polygon tests.
+      const b = valid[j]!.box;
+      if (probe.x < b.minX || probe.x > b.maxX || probe.y < b.minY || probe.y > b.maxY) continue;
+      if (pointInRing(probe, valid[j]!.ring)) {
         depth++;
         innermost = j; // sorted by area desc — the last hit is the smallest container
       }
@@ -229,9 +274,10 @@ const ringD = (ring: Ring): string =>
  * polygons, which matters a lot for glossy/curvy shapes (letters) where a high
  * vertex count makes NFP computation explode.
  *
- * With `captureFine`, each part ALSO keeps its unsimplified geometry: an exact
- * <path> source for smooth rendering/SVG export and the fine mm contour for
- * high-fidelity DXF export. The nester still works on the light polygons.
+ * With `captureFine`, each part ALSO keeps its true geometry (only points
+ * within FINE_TOLERANCE_MM of the outline are dropped): an exact <path> source
+ * for rendering, and the fine mm contour that is NESTED and EXPORTED — so the
+ * cut part has exactly the drawn size. The light polygon is only a preview.
  */
 export function contoursToParts(
   contours: Contour[],
@@ -270,15 +316,18 @@ export function contoursToParts(
   for (const c of contours) {
     const outer = finalizeRing(c.outer, mmPerUnit, toleranceMm);
     if (outer.length < 3 || ringArea(outer) < MIN_PART_AREA_MM2) continue;
-    const holes = c.holes
-      .map((h) => finalizeRing(h, mmPerUnit, toleranceMm))
-      .filter((h) => h.length >= 3 && ringArea(h) > MIN_PART_AREA_MM2 * 0.25);
+    // Light and fine holes stay index-aligned (callers map one onto the other).
+    const holePairs = c.holes
+      .map((raw) => ({ raw, light: finalizeRing(raw, mmPerUnit, toleranceMm) }))
+      .filter((h) => h.light.length >= 3 && ringArea(h.light) > MIN_PART_AREA_MM2 * 0.25);
+    const holes = holePairs.map((h) => h.light);
     const id = `p-${idx}`;
     parts.push({ id, label: `shape ${idx + 1}`, contour: { outer, holes }, quantity: 1 });
     if (captureFine) {
+      const thin = (ring: Ring): Ring => simplifyRing(scaleRing(ring, mmPerUnit), FINE_TOLERANCE_MM);
       const fine: Contour = {
-        outer: scaleRing(c.outer, mmPerUnit),
-        holes: c.holes.map((h) => scaleRing(h, mmPerUnit)).filter((h) => h.length >= 3),
+        outer: thin(c.outer),
+        holes: holePairs.map((h) => thin(h.raw)),
       };
       fineContours.set(id, fine);
       sources.set(id, {
@@ -299,6 +348,12 @@ export function contoursToParts(
 }
 
 const translateRing = (ring: Ring, dx: number, dy: number): Ring => ring.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+
+const contourAreaKey = (c: Contour): string => {
+  let a = ringArea(c.outer);
+  for (const h of c.holes) a -= ringArea(h);
+  return a.toFixed(1);
+};
 
 /**
  * Merges REPEATED shapes into one part with a quantity. A sign job is mostly
@@ -346,7 +401,11 @@ export function dedupeRepeatedParts(
       }
     }
     const ringKey = (r: Ring): string => r.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(';');
-    const key = ringKey(part.contour.outer) + '||' + part.contour.holes.map(ringKey).join('|');
+    // The TRUE (fine) geometry must match too: two shapes that merely simplify
+    // alike must never share one cut contour.
+    const fine = fineContours?.get(part.id);
+    const fineKey = fine ? `#${fine.outer.length}/${fine.holes.length}/${contourAreaKey(fine)}` : '';
+    const key = ringKey(part.contour.outer) + '||' + part.contour.holes.map(ringKey).join('|') + fineKey;
     const kept = seen.get(key);
     if (kept) {
       kept.quantity = (kept.quantity ?? 1) + (part.quantity ?? 1);

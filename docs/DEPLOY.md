@@ -19,6 +19,7 @@ State is a single SQLite file — no external database to provision.
 | `DATA_DIR` | No | Where the SQLite DB lives. **Must be persistent storage.** |
 | `CORS_ORIGIN` | No | Set to your domain if you ever host the frontend separately. |
 | `STARTING_CREDITS` | No | Free credits per new account (default 100). |
+| `VIP_ALL` | No | `true` (default): every account is VIP — nesting is free and unlimited (usage is still logged). Set `false` to charge credits again. |
 
 ## Fastest: one-command bootstrap (fresh Ubuntu/Debian VPS)
 

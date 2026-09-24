@@ -1,6 +1,6 @@
 import type { Contour, Part, Point, Ring } from '@nestflow/engine';
 import { pointInRing, ringArea, ringCentroid } from '@nestflow/engine';
-import { contoursToParts, dedupeRepeatedParts, dropSheetFrames, innerPointOf, ringsToContours, type ImportResult, type VectorSource } from './importCommon';
+import { contoursToParts, dedupeRepeatedParts, dropSheetFrames, innerPointOf, overallSize, ringsToContours, type ImportResult, type VectorSource } from './importCommon';
 import { identity, invert, multiply, scaled, type Mat } from './matrix';
 
 /**
@@ -152,6 +152,8 @@ export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
   const allParts: ImportResult['parts'] = [];
   const warnings: string[] = [];
   const sources = new Map<string, VectorSource>();
+  // True-size contours: what is nested and exported (the light polygon is a preview).
+  const fineContours = new Map<string, Contour>();
   try {
     const nodes = mounted.querySelectorAll('path,rect,circle,ellipse,polygon,polyline');
     let idx = 0;
@@ -162,9 +164,22 @@ export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
       const rings = elementRings(node, geo, ctm).filter((r) => Math.abs(ringArea(r)) > 1e-6);
       if (!rings.length) return;
       const contours: Contour[] = ringsToContours(rings);
-      const { parts } = contoursToParts(contours, pxToMm, undefined, idx);
-      // A single-part element keeps its exact original geometry for output.
-      if (parts.length === 1) sources.set(parts[0]!.id, captureSource(node, ctm, pxToMm));
+      const res = contoursToParts(contours, pxToMm, undefined, idx, true);
+      const parts = res.parts;
+      for (const pt of parts) {
+        const fine = res.fineContours?.get(pt.id);
+        if (fine) fineContours.set(pt.id, fine);
+      }
+      if (parts.length === 1) {
+        // A single-part element keeps its exact original geometry for output.
+        sources.set(parts[0]!.id, captureSource(node, ctm, pxToMm));
+      } else {
+        // Several parts from one element: draw each from its fine contour.
+        for (const pt of parts) {
+          const src = res.sources?.get(pt.id);
+          if (src) sources.set(pt.id, src);
+        }
+      }
       allParts.push(...parts);
       idx += parts.length;
     });
@@ -180,14 +195,16 @@ export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
     for (const pt of [...allParts]) {
       if (!keepSet.has(pt.contour.outer)) {
         sources.delete(pt.id);
+        fineContours.delete(pt.id);
         allParts.splice(allParts.indexOf(pt), 1);
       }
     }
     warnings.push('Sheet frame rectangle ignored.');
   }
-  const grouped = groupNestedElements(allParts, sources);
-  const deduped = dedupeRepeatedParts(grouped, sources);
-  return { parts: deduped, warnings, sources };
+  const grouped = groupNestedElements(allParts, sources, fineContours);
+  const size = overallSize(grouped);
+  const deduped = dedupeRepeatedParts(grouped, sources, fineContours);
+  return { parts: deduped, warnings, sources, fineContours, ...(size ? { size } : {}) };
 }
 
 /**
@@ -199,7 +216,11 @@ export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
  * Exact sources are merged too — the hole element's markup is re-expressed in
  * the container's local frame — so curves stay exact end-to-end.
  */
-function groupNestedElements(parts: Part[], sources: Map<string, VectorSource>): Part[] {
+function groupNestedElements(
+  parts: Part[],
+  sources: Map<string, VectorSource>,
+  fineContours: Map<string, Contour>,
+): Part[] {
   if (parts.length < 2) return parts;
   const items = parts
     .map((part) => ({ part, area: ringArea(part.contour.outer), probe: innerPointOf(part.contour.outer) }))
@@ -236,10 +257,18 @@ function groupNestedElements(parts: Part[], sources: Map<string, VectorSource>):
     }
     const host = items[container]!.part;
     host.contour.holes.push(item.part.contour.outer);
+    const hostFine = fineContours.get(host.id);
+    const itemFine = fineContours.get(item.part.id);
+    if (hostFine && itemFine) hostFine.holes.push(itemFine.outer);
+    else fineContours.delete(host.id); // cannot stay consistent: fall back to the light polygon
     // The absorbed element's own holes are islands: solid material again.
-    for (const islandRing of item.part.contour.holes) {
-      out.push({ ...item.part, id: `${item.part.id}-i${out.length}`, contour: { outer: islandRing, holes: [] } });
-    }
+    item.part.contour.holes.forEach((islandRing, k) => {
+      const id = `${item.part.id}-i${out.length}`;
+      out.push({ ...item.part, id, contour: { outer: islandRing, holes: [] } });
+      const fineIsland = itemFine?.holes[k];
+      if (fineIsland) fineContours.set(id, { outer: fineIsland, holes: [] });
+    });
+    fineContours.delete(item.part.id);
     // Merge exact sources into ONE <path> with subpaths (holes only render as
     // holes under a single evenodd fill — separate sibling elements would each
     // fill solid). Falls back to the flattened polygon render when not possible.

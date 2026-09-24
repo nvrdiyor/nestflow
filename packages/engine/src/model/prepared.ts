@@ -77,7 +77,8 @@ export class PreparedPart {
   readonly rotations: number[];
   readonly mirror: boolean;
   readonly netArea: number;
-  private readonly baseContour: Contour;
+  /** The raw contour exactly as supplied (engine units). */
+  readonly contour: Contour;
   private readonly clearance: number;
   private readonly cache = new Map<string, OrientedShape>();
 
@@ -85,7 +86,7 @@ export class PreparedPart {
     this.id = part.id;
     this.label = part.label;
     this.quantity = Math.max(1, part.quantity ?? 1);
-    this.baseContour = part.contour;
+    this.contour = part.contour;
     const spacing = config.spacing ?? 0;
     const kerf = config.kerf ?? 0;
     this.clearance = spacing / 2 + kerf / 2;
@@ -107,6 +108,13 @@ export class PreparedPart {
   }
 
   private optionsCache: Array<{ rotation: number; mirror: boolean }> | null = null;
+
+  /** Every allowed (rotation, mirror) pair, without geometric dedupe (cheap). */
+  rawOrientations(): Array<{ rotation: number; mirror: boolean }> {
+    const out: Array<{ rotation: number; mirror: boolean }> = [];
+    for (const rotation of this.rotations) for (const mirror of this.mirror ? [false, true] : [false]) out.push({ rotation, mirror });
+    return out;
+  }
 
   /**
    * All (rotation, mirror) orientation options, memoised and DEDUPED by the
@@ -147,7 +155,7 @@ export class PreparedPart {
     const cached = this.cache.get(key);
     if (cached) return cached;
 
-    let contour = this.baseContour;
+    let contour = this.contour;
     if (mirror) contour = mirrorContour(contour, 0);
     contour = rotateContour(contour, rotation);
 

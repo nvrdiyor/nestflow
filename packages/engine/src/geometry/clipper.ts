@@ -116,3 +116,16 @@ export function offsetRingClipper(ring: Ring, delta: number): Region {
   co.Execute(tree, delta * SCALE);
   return polyTreeToRegion(tree);
 }
+
+/**
+ * Offsets a whole region (outers grow, holes shrink for delta > 0) with rounded
+ * joins. `arcTolMm` bounds how far the chorded round joins may fall short of
+ * the true circular offset — callers needing a guaranteed clearance add it on.
+ */
+export function offsetRegionClipper(region: Region, delta: number, arcTolMm = 0.01): Region {
+  const co = new ClipperOffset(2, Math.max(1, arcTolMm * SCALE));
+  co.AddPaths(regionToPaths(region), JoinType.jtRound, EndType.etClosedPolygon);
+  const tree = new PolyTreeCtor();
+  co.Execute(tree, delta * SCALE);
+  return polyTreeToRegion(tree);
+}

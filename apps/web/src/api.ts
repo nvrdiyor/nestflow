@@ -10,6 +10,8 @@ export interface ApiUser {
   email: string;
   name: string;
   credits: number;
+  /** VIP accounts nest for free and without limits (server decides). */
+  vip?: boolean;
   nests: number;
   createdAt: number;
   lastActive: number;

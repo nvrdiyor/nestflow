@@ -40,7 +40,6 @@ interface SavedWork {
   sources: Map<string, VectorSource>;
   fineContours: Map<string, Contour>;
   importScale: number;
-  importTol: number;
   baseW: number;
   baseH: number;
   lastParts: Part[];
@@ -151,7 +150,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   }
   root.innerHTML = appNavMarkup(user) + toolMarkup();
 
-  let worker: Worker; // recreated by the hang watchdog if a nest never returns
+  let workers: Worker[] = []; // parallel search lanes, recreated by the hang watchdog
   const el = <T extends HTMLElement = HTMLElement>(id: string): T => document.getElementById(id) as T;
   const num = (id: string): number => Number(el<HTMLInputElement>(id).value) || 0;
   const checked = (id: string): boolean => el<HTMLInputElement>(id).checked;
@@ -165,7 +164,6 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   let sources = savedWork?.sources ?? new Map<string, VectorSource>();
   let fineContours = savedWork?.fineContours ?? new Map<string, Contour>();
   let importScale = savedWork?.importScale ?? 1; // mm per file unit, set via real-size fields
-  let importTol = savedWork?.importTol ?? 0; // nesting-polygon deviation, compensated in spacing
   let baseW = savedWork?.baseW ?? 0; // imported bbox at scale 1, mm
   let baseH = savedWork?.baseH ?? 0;
   let zoom: ZoomPan | null = null;
@@ -200,6 +198,18 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const currentSources = (): Map<string, VectorSource> => (mirrorOn() ? mirrorSources(sources) : sources);
   const currentFine = (): Map<string, Contour> => (mirrorOn() ? mirrorFineContours(fineContours) : fineContours);
 
+  // What actually gets NESTED: the true (fine) contour of every part. The light
+  // import polygon is a preview only — nesting it let parts drift from their
+  // drawn size and let true outlines creep into each other.
+  const nestParts = (): Part[] => {
+    const fine = currentFine();
+    return currentParts().map((p) => {
+      const c = fine.get(p.id);
+      return c ? { ...p, contour: c } : p;
+    });
+  };
+  const isVip = (): boolean => api.cachedUser()?.vip === true;
+
   const instanceCount = (parts: Part[]): number => parts.reduce((s, p) => s + (p.quantity ?? 1), 0);
 
   const fitEnabled = (): boolean => checked('fitSheet');
@@ -222,9 +232,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       units: 'mm',
       rotations: checked('allowRot') ? ROTATIONS : [0],
       allowMirror: mirrorMode() === 'auto', // per-part, only where it helps
-      // The nesting polygon may deviate up to importTol from the true curve —
-      // widen the spacing by that amount so real geometry keeps the asked gap.
-      spacing: toMm('spacing') + importTol,
+      // Parts are nested on their true contours, so the asked gap is exact.
+      spacing: toMm('spacing'),
       kerf: num('kerf'), // kerf is always mm — it is a sub-millimetre quantity
       holeFilling: checked('holeFilling'),
       strategy: STRATEGY,
@@ -236,12 +245,13 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   const updateCostLabel = (): void => {
     const n = instanceCount(currentParts());
-    runBtn.textContent = n ? `${t('app.nestLayout')} · ${nestCost(n, STRATEGY)} ${t('nav.credits')}` : t('app.nestLayout');
+    runBtn.textContent =
+      n && !isVip() ? `${t('app.nestLayout')} · ${nestCost(n, STRATEGY)} ${t('nav.credits')}` : t('app.nestLayout');
     runBtn.disabled = busy || n === 0;
   };
 
   const updateCreditsPill = (credits: number): void => {
-    if (creditsEl) {
+    if (creditsEl && !isVip()) {
       creditsEl.textContent = String(credits);
       creditsEl.parentElement?.classList.toggle('low', credits <= 10);
     }
@@ -365,6 +375,13 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     exportDxfBtn.disabled = false;
   };
 
+  // Parallel search lanes: every lane runs the same job from different seed
+  // layouts on its own CPU core and the lowest-score layout wins. One core is
+  // left free for the UI.
+  const LANES = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
+  type WorkerMsg = { result?: NestResult; error?: string; progress?: number; overlaps?: number };
+  let lanes = { pending: 0, evals: 0, error: '', best: null as { result: NestResult; overlaps: number } | null };
+
   const run = (): void => {
     if (busy) return;
     const u = api.cachedUser();
@@ -372,13 +389,13 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       navigate('#/login');
       return;
     }
-    const parts = currentParts();
+    const parts = nestParts();
     if (!parts.length) {
       statusMsg(t('app.uploadFirst'), true);
       return;
     }
     const instances = instanceCount(parts);
-    const cost = nestCost(instances, STRATEGY);
+    const cost = u.vip ? 0 : nestCost(instances, STRATEGY);
     if (u.credits < cost) {
       statusMsg(t('app.notEnough', { cost, have: u.credits }), true);
       return;
@@ -388,32 +405,53 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     runCtx = { instances, strategy: STRATEGY, cost, parts };
     statusMsg(t('app.nesting', { n: instances, s: STRATEGY }));
     showVeil();
-    worker.postMessage({ parts, config: currentConfig() });
+    const config = currentConfig();
+    lanes = { pending: workers.length, evals: 0, error: '', best: null };
+    workers.forEach((w, i) =>
+      w.postMessage({ parts, config: { ...config, seed: ((config.seed ?? 1) + i * 7919) >>> 0, lane: i } }),
+    );
     armWatchdog();
   };
 
-  async function onWorkerMessage(e: MessageEvent<{ result?: NestResult; error?: string; progress?: number; overlaps?: number }>): Promise<void> {
+  function onWorkerMessage(e: MessageEvent<WorkerMsg>): void {
     if (e.data.progress !== undefined) {
       armWatchdog(); // the engine is alive — keep waiting
       setProgress(e.data.progress);
       return;
     }
+    if (!busy || lanes.pending <= 0) return;
+    const r = e.data.result;
+    if (r) {
+      lanes.evals += r.iterations;
+      if (!lanes.best || r.score < lanes.best.result.score) lanes.best = { result: r, overlaps: e.data.overlaps ?? 0 };
+    } else if (e.data.error) {
+      lanes.error ||= e.data.error;
+    }
+    if (--lanes.pending > 0) return;
     disarmWatchdog();
-    if (e.data.error) {
+    void finishRun();
+  }
+
+  function onWorkerError(e: ErrorEvent): void {
+    e.preventDefault();
+    if (!busy || lanes.pending <= 0) return;
+    lanes.error ||= e.message || 'worker failed';
+    if (--lanes.pending > 0) return;
+    disarmWatchdog();
+    void finishRun();
+  }
+
+  async function finishRun(): Promise<void> {
+    const best = lanes.best;
+    if (!best) {
       busy = false;
       runBtn.disabled = false;
       runCtx = null;
       hideVeil(false);
-      statusMsg(`Error: ${e.data.error}`, true);
+      statusMsg(`Error: ${lanes.error || 'no layout'}`, true);
       return;
     }
-    const r = e.data.result;
-    if (!r) {
-      busy = false;
-      runBtn.disabled = false;
-      hideVeil(false);
-      return;
-    }
+    const r = best.result;
     // Charge FIRST (the server reprices) — the paid deliverable (layout render
     // + enabled exports) only appears once the charge succeeds, so blocking or
     // failing /api/nest/complete cannot yield a free, exportable nest. `busy`
@@ -449,43 +487,40 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     const out = fitEnabled() ? fitToParts(r, lastParts, toMm('margin')) : r;
     render(out);
     hideVeil(true);
-    const overlaps = e.data.overlaps ?? 0;
-    if (overlaps > 0) {
-      statusMsg(t('app.overlapWarn', { n: overlaps }), true);
+    if (best.overlaps > 0) {
+      statusMsg(t('app.overlapWarn', { n: best.overlaps }), true);
     } else {
       statusMsg(
-        `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${r.iterations} layouts` +
+        `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${lanes.evals} layouts` +
           (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : ''),
       );
     }
     updateCostLabel();
   }
-  function onWorkerError(e: ErrorEvent): void {
-    disarmWatchdog();
-    busy = false;
-    runBtn.disabled = false;
-    runCtx = null;
-    hideVeil(false);
-    statusMsg(`Worker error: ${e.message}`, true);
-  }
-  function spawnWorker(): void {
-    worker = new Worker(new URL('../nest.worker.ts', import.meta.url), { type: 'module' });
-    worker.onmessage = onWorkerMessage;
-    worker.onerror = onWorkerError;
-  }
-  spawnWorker();
 
-  // If the engine goes silent far beyond its 8s budget, the job is stuck on
-  // pathological geometry — kill the worker instead of hanging at 99% forever.
+  function spawnWorkers(): void {
+    workers = Array.from({ length: LANES }, () => {
+      const w = new Worker(new URL('../nest.worker.ts', import.meta.url), { type: 'module' });
+      w.onmessage = onWorkerMessage;
+      w.onerror = onWorkerError;
+      return w;
+    });
+  }
+  spawnWorkers();
+
+  // If the engine goes silent for this long, the job is stuck on pathological
+  // geometry — kill the workers instead of hanging at 99% forever. The engine
+  // heartbeats after every placed part, so a healthy run is never this quiet.
   // No credits are lost: charging only ever happens after a result arrives.
   const WATCHDOG_MS = 120_000;
   function armWatchdog(): void {
     clearTimeout(watchdog);
     watchdog = window.setTimeout(() => {
-      worker.terminate();
-      spawnWorker();
+      workers.forEach((w) => w.terminate());
+      spawnWorkers();
       busy = false;
       runCtx = null;
+      lanes.pending = 0;
       hideVeil(false);
       updateCostLabel();
       statusMsg(t('app.tooComplex'), true);
@@ -514,22 +549,18 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     importedParts = parts;
     sources = result.sources ?? new Map(); // exact geometry (SVG elements / DXF fine paths)
     fineContours = result.fineContours ?? new Map();
-    importTol = Math.min(2, result.simplifyTolMm ?? 0);
     importInfo.classList.toggle('warn', warnings.length > 0);
-    // Overall size of the import, so a wrong-unit file is obvious at a glance.
-    let bMinX = Infinity;
-    let bMinY = Infinity;
-    let bMaxX = -Infinity;
-    let bMaxY = -Infinity;
-    for (const p of parts) {
-      const b = ringBounds(p.contour.outer);
-      if (b.minX < bMinX) bMinX = b.minX;
-      if (b.minY < bMinY) bMinY = b.minY;
-      if (b.maxX > bMaxX) bMaxX = b.maxX;
-      if (b.maxY > bMaxY) bMaxY = b.maxY;
+    // Overall size of the DRAWING (as laid out in the file), so a wrong-unit
+    // file is obvious at a glance and "real size" rescales the whole drawing.
+    let impW = result.size?.w ?? 0;
+    let impH = result.size?.h ?? 0;
+    if (!(impW > 0)) {
+      for (const p of parts) {
+        const b = ringBounds(p.contour.outer);
+        impW = Math.max(impW, b.maxX - b.minX);
+        impH = Math.max(impH, b.maxY - b.minY);
+      }
     }
-    const impW = Number.isFinite(bMinX) ? bMaxX - bMinX : 0;
-    const impH = Number.isFinite(bMinX) ? bMaxY - bMinY : 0;
     if (impW > 0) {
       baseW = impW / importScale;
       baseH = impH / importScale;
@@ -549,6 +580,14 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     showPreview(t('app.partsReady'));
   };
 
+  // A NEW file always starts at its true size: a real-size correction typed
+  // for the previous file must never silently rescale the next one (that bug
+  // made a 12.5 cm part come out 12.2 cm).
+  const openFile = (text: string, name: string): void => {
+    importScale = 1;
+    loadFile(text, name);
+  };
+
   const fileInput = el<HTMLInputElement>('file');
   el('browse').addEventListener('click', () => fileInput.click());
   el('drop').addEventListener('click', (e) => {
@@ -556,7 +595,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   });
   fileInput.addEventListener('change', () => {
     const f = fileInput.files?.[0];
-    if (f) f.text().then((t) => loadFile(t, f.name));
+    if (f) f.text().then((t) => openFile(t, f.name));
+    fileInput.value = ''; // re-selecting the same file must fire 'change' again
   });
   const drop = el('drop');
   ['dragenter', 'dragover'].forEach((ev) =>
@@ -573,7 +613,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   );
   drop.addEventListener('drop', (e) => {
     const f = (e as DragEvent).dataTransfer?.files?.[0];
-    if (f) f.text().then((t) => loadFile(t, f.name));
+    if (f) f.text().then((t) => openFile(t, f.name));
   });
   // Typing the REAL width or height rescales the whole import proportionally —
   // fixes files exported without unit info (common from CorelDRAW).
@@ -686,8 +726,18 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   api
     .me()
     .then((fresh) => {
-      if (fresh) updateCreditsPill(fresh.credits);
-      else navigate('#/login');
+      if (!fresh) {
+        navigate('#/login');
+        return;
+      }
+      // A stale cached session may predate VIP: redraw the pill + run label.
+      const pill = root.querySelector<HTMLElement>('.credits-pill');
+      if (fresh.vip && pill && !pill.classList.contains('vip')) {
+        pill.className = 'credits-pill vip';
+        pill.innerHTML = '<b>VIP</b> ∞';
+        updateCostLabel();
+      }
+      updateCreditsPill(fresh.credits);
     })
     .catch((err) => {
       if (err instanceof api.ApiError && err.status === 401) navigate('#/login');
@@ -696,7 +746,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   return () => {
     disarmWatchdog();
-    worker.terminate();
+    workers.forEach((w) => w.terminate());
     zoom?.destroy();
     clearInterval(veilTimer);
     savedWork = {
@@ -707,7 +757,6 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       sources,
       fineContours,
       importScale,
-      importTol,
       baseW,
       baseH,
       lastParts,

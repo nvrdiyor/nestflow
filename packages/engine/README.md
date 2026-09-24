@@ -33,6 +33,34 @@ feasible(part) =  IFP(sheet, part)  −  ⋃ NFP(placedᵢ, part)          (+ ho
 Because the optimal placement under a monotone objective lies at a **vertex** of
 the feasible region, only region vertices are evaluated.
 
+### The default: the raster (band) engine — thousands of parts
+
+Exact NFPs cost one Minkowski sum per pair of part orientations and one polygon
+boolean per placement, so they grow quadratically: a 400-letter DXF job never
+finished. The default engine (`engine: 'raster'`) instead works on a
+**band grid**: every part (grown by the clearance with Clipper, on its TRUE
+contour — never a simplified one) is cut into horizontal bands of height
+`h ≈ 0.3 mm`, and each band stores the exact x-intervals the part occupies
+anywhere inside it. X stays continuous; only Y is quantised, conservatively,
+so two parts whose intervals are disjoint in every shared band are guaranteed
+to keep the asked gap.
+
+- **Placement** is bottom-left-fill: for each band `k` the leftmost collision-free
+  x is found by a jump search (each move is the minimal shift past one blocking
+  interval), and the part goes to the lowest band where it fits — letters slide
+  into each other's concavities; with hole filling on, counters are just gaps.
+- **Candidate skipping**: a segment tree over every band's widest free gap jumps
+  over packed regions in O(log K); a per-sheet, per-orientation resume cache
+  (feasibility only shrinks as a sheet fills) makes repeated letters nearly free.
+- **Search**: ten heuristic seed layouts, then a threshold-accepting local search
+  over the placement order that keeps pulling the parts on the last sheet (or
+  on the far edge of a single-sheet pack) earlier; it stops once gains dry up.
+  `lane` rotates the seed plan so parallel workers explore different starts.
+
+2 000 letters (800 distinct shapes) pack onto 10 sheets in one pass of a few
+seconds, with zero spacing violations on true geometry. `engine: 'nfp'` keeps
+the classic exact NFP engine described below.
+
 ### Robust Minkowski sums
 
 A direct Minkowski sum of two non-convex polygons is fragile. Instead each part is
@@ -157,6 +185,12 @@ src/
     ifp.ts            Inner-Fit Polygon (rectangular + general erosion)
     cache.ts          NFP / hole-IFP memoisation across the whole search
   model/prepared.ts   Per-part, per-orientation precomputation (grown outlines)
+  raster/             Default engine for large jobs
+    profile.ts        Exact per-band x-intervals of a shape (one edge sweep)
+    sheet.ts          Band occupancy, leftmost-fit jump search, gap segment tree
+    model.ts          Grow each part once (true contour), profile its orientations
+    placer.ts         Multi-sheet first-fit bottom-left placement
+    search.ts         Seed layouts + order local search, parallel lanes
   placement/
     region.ts         Feasible-region computation + vertex candidate scoring
     greedy.ts         Multi-sheet first-fit placement (BLF / bounding-box)

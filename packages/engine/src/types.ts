@@ -119,6 +119,20 @@ export interface NestConfig {
   seed?: number;
   /** Wall-clock budget for search, milliseconds. Overrides strategy defaults. */
   timeLimitMs?: number;
+  /**
+   * Placement engine. 'raster' (default) packs on an exact-x / banded-y
+   * occupancy grid — scales to thousands of parts of any vertex count.
+   * 'nfp' is the classic no-fit-polygon engine (exact, but quadratic).
+   */
+  engine?: 'raster' | 'nfp';
+  /** Raster band height in engine units (default: usable height / 3000, clamped to [0.2, 0.6]). */
+  bandHeight?: number;
+  /**
+   * Parallel search lane (0-based). Lanes start from different seed layouts,
+   * so several workers running the same job explore different regions; pair
+   * it with a distinct `seed` per lane and keep the result with the lowest score.
+   */
+  lane?: number;
   /** Machine parameters for costing. */
   machine?: MachineSpec;
   /** Progress callback invoked during search (0..1). */
@@ -186,6 +200,8 @@ export interface NestResult {
   metrics: NestMetrics;
   /** Number of candidate layouts evaluated by the search. */
   iterations: number;
+  /** Search objective of this layout (lower is better) — compares parallel lanes. */
+  score: number;
   elapsedMs: number;
   config: NestConfig;
 }

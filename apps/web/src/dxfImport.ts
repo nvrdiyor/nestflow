@@ -1,5 +1,5 @@
 import type { Point, Ring } from '@nestflow/engine';
-import { contoursToParts, dedupeRepeatedParts, dropSheetFrames, ringsToContours, type ImportResult } from './importCommon';
+import { contoursToParts, dedupeRepeatedParts, dropSheetFrames, overallSize, ringsToContours, type ImportResult } from './importCommon';
 import { sampleBspline } from './bspline';
 
 /**
@@ -413,6 +413,8 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
   void splines;
 
   const result = contoursToParts(ringsToContours(rings), scale, undefined, 0, true);
+  const size = overallSize(result.parts);
+  if (size) result.size = size;
   result.parts = dedupeRepeatedParts(result.parts, result.sources, result.fineContours);
   result.warnings.unshift(...warnings);
   if (result.parts.length === 0 && warnings.length === 0) {

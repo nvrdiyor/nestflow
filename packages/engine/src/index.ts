@@ -15,4 +15,5 @@ export * from './search/index.js';
 export * from './metrics/index.js';
 export * from './render/index.js';
 export * from './cutpath/index.js';
+export * from './raster/index.js';
 export * from './nester.js';

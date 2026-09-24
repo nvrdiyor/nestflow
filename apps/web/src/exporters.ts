@@ -46,6 +46,11 @@ export function exportSvg(
  * operator sees the plate outline and can hide/skip the layer when cutting.
  */
 export function exportDxf(result: NestResult, parts: Part[], fineContours?: Map<string, Contour>): void {
+  download('nestflow-layout.dxf', buildDxf(result, parts, fineContours), 'application/dxf');
+}
+
+/** The DXF text of a nested layout (pure — no DOM), see {@link exportDxf}. */
+export function buildDxf(result: NestResult, parts: Part[], fineContours?: Map<string, Contour>): string {
   const map = new Map(parts.map((p) => [p.id, p]));
   const sheetW = result.config.sheet.width;
   const sheetH = result.config.sheet.height;
@@ -101,5 +106,5 @@ export function exportDxf(result: NestResult, parts: Part[], fineContours?: Map<
 
   g(0, 'ENDSEC');
   g(0, 'EOF');
-  download('nestflow-layout.dxf', out.join('\n'), 'application/dxf');
+  return out.join('\n');
 }

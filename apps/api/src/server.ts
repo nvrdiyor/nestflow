@@ -18,6 +18,8 @@ export interface ServerOptions {
   webDist?: string;
   corsOrigin?: boolean | string;
   startingCredits?: number;
+  /** Every account is VIP: nests cost 0 credits (usage is still recorded). */
+  vipAll?: boolean;
   logger?: boolean;
   /**
    * Proxy trust for client-IP resolution (rate-limit buckets key on req.ip).
@@ -34,12 +36,13 @@ interface TokenPayload {
   role: 'user' | 'admin';
 }
 
-function publicUser(u: UserRow) {
+function publicUser(u: UserRow, vip = false) {
   return {
     id: u.id,
     email: u.email,
     name: u.name,
     credits: u.credits,
+    vip,
     nests: u.nests,
     createdAt: u.created_at,
     lastActive: u.last_active,
@@ -75,6 +78,9 @@ const adjustSchema = z.object({
 
 export async function buildServer(opts: ServerOptions): Promise<FastifyInstance> {
   const db = new Db(opts.dbFile);
+  const vipAll = opts.vipAll ?? false;
+  const priceOf = (parts: number, strategy: Strategy): number => (vipAll ? 0 : nestCost(parts, strategy));
+  const toPublic = (u: UserRow) => publicUser(u, vipAll);
   const app = Fastify({ logger: opts.logger ?? false, trustProxy: opts.trustProxy ?? false });
 
   await app.register(cors, { origin: opts.corsOrigin ?? true });
@@ -142,7 +148,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     const passHash = await bcrypt.hash(password, 10);
     const user = db.createUser({ email, name, passHash, credits: opts.startingCredits ?? 100 });
     const token = app.jwt.sign({ sub: user.id, role: 'user' } satisfies TokenPayload, { expiresIn: '30d' });
-    return { token, user: publicUser(user) };
+    return { token, user: toPublic(user) };
   });
 
   app.post('/api/auth/login', authLimit, async (req, reply) => {
@@ -155,7 +161,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     }
     db.touchUser(user.id);
     const token = app.jwt.sign({ sub: user.id, role: 'user' } satisfies TokenPayload, { expiresIn: '30d' });
-    return { token, user: publicUser({ ...user, last_active: Date.now() }) };
+    return { token, user: toPublic({ ...user, last_active: Date.now() }) };
   });
 
   app.get('/api/me', async (req, reply) => {
@@ -163,7 +169,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     if (!payload) return reply;
     const user = db.userById(payload.sub);
     if (!user) return reply.code(401).send({ error: 'Unauthorized' });
-    return { user: publicUser(user) };
+    return { user: toPublic(user) };
   });
 
   // ---------- nesting / credits ----------
@@ -174,7 +180,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       .object({ parts: z.number().int().min(1).max(100_000), strategy: z.enum(STRATEGIES as [Strategy, ...Strategy[]]) })
       .safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid input' });
-    return { cost: nestCost(parsed.data.parts, parsed.data.strategy) };
+    return { cost: priceOf(parsed.data.parts, parsed.data.strategy) };
   });
 
   app.post('/api/nest/complete', async (req, reply) => {
@@ -184,7 +190,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid input' });
     const { parts, strategy, sheets, utilPct } = parsed.data;
     // The server recomputes the price — the client-sent value is never trusted.
-    const cost = nestCost(parts, strategy);
+    const cost = priceOf(parts, strategy);
     const remaining = db.chargeNest(payload.sub, { parts, strategy, cost, sheets, utilPct });
     if (remaining === null) {
       const user = db.userById(payload.sub);
@@ -207,7 +213,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
 
   app.get('/api/admin/overview', async (req, reply) => {
     if (!(await requireAdmin(req, reply))) return reply;
-    const users = db.allUsers().map(publicUser);
+    const users = db.allUsers().map(toPublic);
     const usage = db.recentUsage(50).map((u) => ({
       at: u.at,
       email: u.email,

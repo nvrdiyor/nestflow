@@ -10,6 +10,7 @@ const app = await buildServer({
   webDist: env.webDist,
   corsOrigin: env.corsOrigin,
   startingCredits: env.startingCredits,
+  vipAll: env.vipAll,
   logger: true,
 });
 

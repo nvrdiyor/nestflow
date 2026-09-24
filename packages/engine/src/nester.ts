@@ -3,6 +3,8 @@ import { prepareInstances } from './model/prepared.js';
 import { NfpCache } from './nfp/cache.js';
 import { reinsertLastSheet, type GreedyOptions } from './placement/index.js';
 import { runSearch } from './search/index.js';
+import { paramsForStrategy } from './search/strategy.js';
+import { runRasterSearch } from './raster/search.js';
 import { computeMetrics } from './metrics/index.js';
 
 const DEFAULT_SEED = 0x1234_5678;
@@ -64,16 +66,33 @@ export function nest(parts: Part[], config: NestConfig): NestResult {
     cache,
   };
 
-  const outcome = runSearch(instances, greedyOpts, {
-    strategy: config.strategy ?? 'balanced',
-    seed: config.seed ?? DEFAULT_SEED,
-    sheetArea,
-    ...(config.timeLimitMs !== undefined ? { timeLimitMs: config.timeLimitMs } : {}),
-    ...(config.onProgress ? { onProgress: config.onProgress } : {}),
-  });
-
-  // Rescue pass: pull stragglers off the last sheet into earlier pockets.
-  reinsertLastSheet(outcome.result, greedyOpts);
+  const strategy = config.strategy ?? 'balanced';
+  let outcome: { result: ReturnType<typeof runSearch>['result']; iterations: number; fitness: number };
+  if ((config.engine ?? 'raster') === 'raster') {
+    outcome = runRasterSearch(instances, {
+      usable,
+      clearance: (config.spacing ?? 0) / 2 + (config.kerf ?? 0) / 2,
+      holeFilling: greedyOpts.holeFilling,
+      sheetLimit: greedyOpts.sheetLimit,
+      sheetArea,
+      seed: config.seed ?? DEFAULT_SEED,
+      timeLimitMs: paramsForStrategy(strategy, config.timeLimitMs).timeLimitMs,
+      localSearch: strategy !== 'fast',
+      ...(config.lane !== undefined ? { lane: config.lane } : {}),
+      ...(config.bandHeight !== undefined ? { bandHeight: config.bandHeight } : {}),
+      ...(config.onProgress ? { onProgress: config.onProgress } : {}),
+    });
+  } else {
+    outcome = runSearch(instances, greedyOpts, {
+      strategy,
+      seed: config.seed ?? DEFAULT_SEED,
+      sheetArea,
+      ...(config.timeLimitMs !== undefined ? { timeLimitMs: config.timeLimitMs } : {}),
+      ...(config.onProgress ? { onProgress: config.onProgress } : {}),
+    });
+    // Rescue pass: pull stragglers off the last sheet into earlier pockets.
+    reinsertLastSheet(outcome.result, greedyOpts);
+  }
 
   const metrics = computeMetrics(outcome.result, config);
 
@@ -83,6 +102,7 @@ export function nest(parts: Part[], config: NestConfig): NestResult {
     sheetsUsed: outcome.result.sheets.length,
     metrics,
     iterations: outcome.iterations,
+    score: outcome.fitness,
     elapsedMs: Date.now() - started,
     config,
   };
