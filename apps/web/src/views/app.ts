@@ -465,7 +465,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       runBtn.disabled = false;
       runCtx = null;
       hideVeil(false);
-      statusMsg(`Error: ${lanes.error || 'no layout'}`, true);
+      statusMsg(t('app.error', { msg: lanes.error || 'no layout' }), true);
       return;
     }
     const r = best.result;
@@ -515,8 +515,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       statusMsg(t('app.overlapWarn', { n: best.overlaps }), true);
     } else {
       statusMsg(
-        `Done in ${r.elapsedMs} ms · ${r.placements.length} placed · ${lanes.evals} layouts` +
-          (r.unplaced.length ? ` · ${r.unplaced.length} did not fit` : ''),
+        t('app.done', { sec: (r.elapsedMs / 1000).toFixed(1), n: r.placements.length, layouts: lanes.evals }) +
+          (r.unplaced.length ? ` · ${t('app.didNotFit', { n: r.unplaced.length })}` : ''),
       );
     }
     updateCostLabel();
@@ -560,13 +560,24 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (/\.svg$/i.test(name) || /<svg[\s>]/i.test(text)) return false;
     return /\bENTITIES\b/.test(text) && /\bSECTION\b/.test(text);
   };
+  // Importers speak English; show their known warnings in the UI language.
+  const localizeWarning = (w: string): string => {
+    const n = /(\d+)/.exec(w)?.[1] ?? '';
+    if (/capped/i.test(w)) return t('warn.capped', { n });
+    if (/frame/i.test(w)) return t('warn.frame');
+    if (/Double-outline/i.test(w)) return t('warn.traced');
+    if (/block insert/i.test(w)) return t('warn.inserts', { n });
+    if (/open outline/i.test(w)) return t('warn.open', { n });
+    return w;
+  };
+
   const loadFile = (text: string, name: string): void => {
     importedText = text;
     importedName = name;
     const result = isDxf(text, name) ? importDxfParts(text, importScale) : importSvgParts(text, importScale);
     const { parts, warnings } = result;
     if (!parts.length) {
-      importInfo.textContent = warnings[0] ?? 'No shapes found.';
+      importInfo.textContent = warnings[0] ? localizeWarning(warnings[0]) : 'No shapes found.';
       importInfo.classList.add('warn');
       return;
     }
@@ -599,7 +610,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     importInfo.textContent =
       t('app.importedShapes', { n: instanceCount(parts), fmt: isDxf(text, name) ? 'DXF' : 'SVG' }) +
       sizeStr +
-      (warnings.length ? ' · ' + warnings[0] : '');
+      (warnings.length ? ' · ' + localizeWarning(warnings[0]!) : '');
     updateCostLabel();
     showPreview(t('app.partsReady'));
   };
