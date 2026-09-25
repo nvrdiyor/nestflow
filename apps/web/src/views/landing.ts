@@ -200,26 +200,26 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
 
   <section class="section" id="pricing">
     <div class="container">
-      <div class="section-head rv"><h2>${t('l.priceTitle')}</h2><p>${t('l.priceSub', { n: '<span class="js-free-n">3</span>' })}</p></div>
+      <div class="section-head rv"><h2>${t('l.priceTitle')}</h2><p>${t('l.priceSub', { n: '<span class="js-free-n">7</span>' })}</p></div>
       <div class="rv" style="display:flex;justify-content:center">${periodPickerMarkup()}</div>
       <div class="pricing">
         <div class="price-card rv">
           <div class="pc-name">${t('l.pFreeName')}</div>
-          <div class="pc-price">0 <small>${t('plan.perMonth')}</small></div>
-          <ul>${bullet(t('l.pFreeB1', { n: '<span class="js-free-n">3</span>' }))}${bullet(t('l.pFreeB2'))}${bullet(t('l.pFreeB3'))}</ul>
+          <div class="pc-price">0 <small>${t('l.pTrialPer', { n: '<span class="js-free-n">7</span>' })}</small></div>
+          <ul>${bullet(t('l.pFreeB1', { n: '<span class="js-free-n">7</span>' }))}${bullet(t('l.pFreeB2'))}${bullet(t('l.pFreeB3'))}</ul>
           <button class="btn btn-glass js-start-p">${t('l.pFreeCta')}</button>
         </div>
         <div class="price-card hot rv">
           <div class="pc-pop">${t('l.popular')}</div>
           <div class="pc-name">PRO</div>
-          <div class="pc-price"><span class="js-pro-price">150 000</span> <small>${t('plan.perMonth')}</small></div>
+          <div class="pc-price"><span class="js-pro-price">70 000</span> <small>${t('plan.perMonth')}</small></div>
           <div class="pl-total js-total" data-plan="PRO"></div>
           <ul>${bullet(t('plan.proB1', { n: '<span class="js-pro-credits">10 000</span>' }))}${bullet(t('plan.proB2'))}${bullet(t('plan.proB3'))}</ul>
           <a class="btn btn-primary js-buy" data-plan="PRO" href="${salesLink('dior_react')}" target="_blank" rel="noopener">${t('l.pBuyPro')}</a>
         </div>
         <div class="price-card rv">
           <div class="pc-name">VIP</div>
-          <div class="pc-price"><span class="js-vip-price">300 000</span> <small>${t('plan.perMonth')}</small></div>
+          <div class="pc-price"><span class="js-vip-price">150 000</span> <small>${t('plan.perMonth')}</small></div>
           <div class="pl-total js-total" data-plan="VIP"></div>
           <ul>${bullet(t('plan.vipB1'))}${bullet(t('plan.vipB2'))}${bullet(t('plan.vipB3'))}</ul>
           <a class="btn btn-glass js-buy" data-plan="VIP" href="${salesLink('dior_react')}" target="_blank" rel="noopener">${t('l.pBuyVip')}</a>
@@ -273,7 +273,7 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
         n.textContent = text;
       });
     };
-    set('.js-free-n', String(cfg.freeNests));
+    set('.js-free-n', String(cfg.trialDays));
     set('.js-pro-price', fmtSum(cfg.plans.pro.price));
     set('.js-vip-price', fmtSum(cfg.plans.vip.price));
     set('.js-pro-credits', fmtSum(cfg.plans.pro.credits));

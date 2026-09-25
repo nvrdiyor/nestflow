@@ -15,6 +15,11 @@ export function initials(name: string): string {
  * nests left. It is a button: clicking it opens the plans dialog.
  */
 export function pillMarkup(user: ApiUser): string {
+  const trial = (user.trialUntil ?? 0) - Date.now();
+  if (user.plan !== 'pro' && user.plan !== 'vip' && trial > 0) {
+    const days = Math.max(1, Math.ceil(trial / (24 * 3600 * 1000)));
+    return `<button class="credits-pill trial js-plans" type="button">${t('plan.pillTrial', { n: `<b>${days}</b>` })}</button>`;
+  }
   if (user.vip) return `<button class="credits-pill vip js-plans" type="button" title="VIP"><b>VIP</b> ∞</button>`;
   if (user.plan === 'pro') {
     const low = user.credits <= 100 ? ' low' : '';

@@ -16,7 +16,9 @@ export interface ApiUser {
   plan?: 'free' | 'pro' | 'vip';
   /** When the pro/vip plan ends (ms), 0 for free. */
   planUntil?: number;
-  /** Complimentary nests still available. */
+  /** End of the free trial (ms) while it runs, else 0. */
+  trialUntil?: number;
+  /** Complimentary nests still available (after the trial). */
   freeLeft?: number;
   /** Linked Telegram @username ('' if it has none), null when not linked. */
   telegram?: string | null;
@@ -31,6 +33,8 @@ export interface PlanSettings {
   vipPrice: number;
   proMonthlyCredits: number;
   freeNests: number;
+  /** Days of unlimited nesting for new accounts. */
+  trialDays: number;
   salesContact: string;
   /** Percent off for 6- and 12-month purchases. */
   discount6: number;
@@ -42,6 +46,7 @@ export interface PublicConfig {
   telegramBot: string | null;
   plans: { pro: { price: number; credits: number }; vip: { price: number } };
   freeNests: number;
+  trialDays: number;
   salesContact: string;
   /** Percent off by period length in months, e.g. { '6': 10, '12': 20 }. */
   discounts: Record<string, number>;
@@ -139,8 +144,9 @@ export interface TgChallenge {
 
 const FALLBACK_CONFIG: PublicConfig = {
   telegramBot: null,
-  plans: { pro: { price: 150_000, credits: 10_000 }, vip: { price: 300_000 } },
-  freeNests: 3,
+  plans: { pro: { price: 70_000, credits: 10_000 }, vip: { price: 150_000 } },
+  freeNests: 0,
+  trialDays: 7,
   salesContact: 'dior_react',
   discounts: { '6': 10, '12': 20 },
 };

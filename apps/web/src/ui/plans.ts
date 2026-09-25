@@ -101,6 +101,7 @@ export function wirePeriods(scope: HTMLElement, cfg: PublicConfig, user: ApiUser
 /** The user's plan in one short line ("PRO · 12.10.2026 gacha"). */
 export function planLine(user: ApiUser): string {
   const plan = user.plan ?? 'free';
+  if (plan === 'free' && (user.trialUntil ?? 0) > Date.now()) return t('plan.trialLine', { date: fmtDay(user.trialUntil!) });
   if (plan === 'free') return t('plan.free');
   const until = user.planUntil ? ` · ${t('plan.until', { date: fmtDay(user.planUntil) })}` : '';
   return `${plan.toUpperCase()}${until}`;

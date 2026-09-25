@@ -6,9 +6,10 @@
  *   cost = number of letters / parts in the job   (1 credit = 1 letter)
  *
  * Plans are sold by hand (the admin grants them after payment in Telegram):
- *   - free: `freeNests` complimentary nests of any size, then a plan is needed.
- *   - pro:  a monthly pack of `proMonthlyCredits`, spent per letter.
- *   - vip:  unlimited nesting while the plan is active.
+ *   - trial: every new account nests without limits for `trialDays` days.
+ *   - free:  after the trial, only `freeNests` complimentary nests (0 by default).
+ *   - pro:   a monthly pack of `proMonthlyCredits`, spent per letter.
+ *   - vip:   unlimited nesting while the plan is active.
  */
 export type Strategy = 'fast' | 'balanced' | 'max';
 export type Plan = 'free' | 'pro' | 'vip';
@@ -28,7 +29,9 @@ export interface PlanSettings {
   proPrice: number;
   vipPrice: number;
   proMonthlyCredits: number;
-  /** Complimentary nests every account gets before it needs a plan. */
+  /** Days of unlimited nesting every new account gets. */
+  trialDays: number;
+  /** Complimentary nests after the trial, before a plan is needed. */
   freeNests: number;
   /** Telegram username (no @) customers write to in order to buy a plan. */
   salesContact: string;
@@ -39,15 +42,22 @@ export interface PlanSettings {
 
 export function defaultSettings(): PlanSettings {
   return {
-    proPrice: 150_000,
-    vipPrice: 300_000,
+    proPrice: 70_000,
+    vipPrice: 150_000,
     proMonthlyCredits: 10_000,
-    freeNests: 3,
+    trialDays: 7,
+    freeNests: 0,
     salesContact: 'dior_react',
     discount6: 10,
     discount12: 20,
   };
 }
+
+export const DAY_MS = 24 * 3600 * 1000;
+
+/** End of the account's free trial (ms since epoch). */
+export const trialEnd = (user: { created_at: number }, trialDays: number): number =>
+  user.created_at + trialDays * DAY_MS;
 
 /** The plan in force right now (an expired pro/vip counts as free). */
 export function effectivePlan(user: { plan: string; plan_until: number }, now = Date.now()): Plan {

@@ -120,7 +120,8 @@ export function renderAuth(root: HTMLElement, navigate: Nav, mode: Mode): void {
     }
     btn.disabled = false;
     const note = root.querySelector<HTMLElement>('.js-free-note');
-    if (note && cfg.freeNests > 0) note.textContent = t('auth.tgFreeNote', { n: cfg.freeNests });
+    if (note && cfg.trialDays > 0) note.textContent = t('auth.tgTrialNote', { n: cfg.trialDays });
+    else if (note && cfg.freeNests > 0) note.textContent = t('auth.tgFreeNote', { n: cfg.freeNests });
   });
 
   btn.addEventListener('click', async () => {

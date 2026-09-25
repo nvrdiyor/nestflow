@@ -50,6 +50,9 @@ function renderLogin(root: HTMLElement, navigate: Nav): void {
 
 const planBadge = (u: api.ApiUser): string => {
   const plan = u.plan ?? 'free';
+  if (plan === 'free' && (u.trialUntil ?? 0) > Date.now()) {
+    return `<span class="plan-badge trial">${t('admin.trialBadge')}</span><div class="admin-sub">${t('plan.until', { date: fmtDay(u.trialUntil!) })}</div>`;
+  }
   if (plan === 'free') {
     return `<span class="plan-badge free">${t('plan.free')}</span><div class="admin-sub">${t('admin.freeLeft', { n: u.freeLeft ?? 0 })}</div>`;
   }
@@ -132,6 +135,7 @@ async function renderDashboard(root: HTMLElement, navigate: Nav): Promise<void> 
       ${field('proPrice', t('admin.proPrice'), s.proPrice)}
       ${field('proMonthlyCredits', t('admin.proCredits'), s.proMonthlyCredits)}
       ${field('vipPrice', t('admin.vipPrice'), s.vipPrice)}
+      ${field('trialDays', t('admin.trialDays'), s.trialDays)}
       ${field('freeNests', t('admin.freeNests'), s.freeNests)}
       ${field('discount6', t('admin.discount6'), s.discount6)}
       ${field('discount12', t('admin.discount12'), s.discount12)}
@@ -218,6 +222,7 @@ async function renderDashboard(root: HTMLElement, navigate: Nav): Promise<void> 
         vipPrice: Math.round(Number(val('vipPrice'))),
         proMonthlyCredits: Math.round(Number(val('proMonthlyCredits'))),
         freeNests: Math.round(Number(val('freeNests'))),
+        trialDays: Math.round(Number(val('trialDays'))),
         salesContact: val('salesContact'),
         discount6: Math.round(Number(val('discount6'))),
         discount12: Math.round(Number(val('discount12'))),

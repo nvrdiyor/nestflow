@@ -14,6 +14,7 @@ import {
   nestCost,
   PLAN_MONTH_MS,
   PLANS,
+  trialEnd,
   STRATEGIES,
   type Plan,
   type PlanSettings,
@@ -54,21 +55,24 @@ interface TokenPayload {
   role: 'user' | 'admin';
 }
 
-function publicUser(u: UserRow, vipAll: boolean, freeNests: number) {
+function publicUser(u: UserRow, vipAll: boolean, s: { freeNests: number; trialDays: number }) {
   const plan = effectivePlan(u);
+  const trialUntil = plan === 'free' && trialEnd(u, s.trialDays) > Date.now() ? trialEnd(u, s.trialDays) : 0;
   return {
     id: u.id,
     // Telegram-only accounts carry a placeholder address — never show it.
     email: u.email.endsWith(`@${TG_EMAIL_DOMAIN}`) ? '' : u.email,
     name: u.name,
     credits: u.credits,
-    /** Unlimited nesting right now (an active VIP plan, or the VIP_ALL switch). */
-    vip: vipAll || plan === 'vip',
+    /** Unlimited nesting right now (active VIP, the free trial, or the VIP_ALL switch). */
+    vip: vipAll || plan === 'vip' || trialUntil > 0,
     plan,
     /** When the active pro/vip plan ends (ms), 0 for free. */
     planUntil: plan === 'free' ? 0 : u.plan_until,
-    /** Complimentary nests still available. */
-    freeLeft: Math.max(0, freeNests - u.free_used),
+    /** End of the free trial (ms) while it is running, else 0. */
+    trialUntil,
+    /** Complimentary nests still available (after the trial). */
+    freeLeft: Math.max(0, s.freeNests - u.free_used),
     /** Linked Telegram @username ('' when linked without one), null when not linked. */
     telegram: u.telegram_id ? (u.telegram_username ?? '') : null,
     nests: u.nests,
@@ -119,6 +123,7 @@ const settingsSchema = z.object({
   vipPrice: z.number().int().min(0).max(100_000_000),
   proMonthlyCredits: z.number().int().min(0).max(10_000_000),
   freeNests: z.number().int().min(0).max(1000),
+  trialDays: z.number().int().min(0).max(365).optional(),
   discount6: z.number().int().min(0).max(90).optional(),
   discount12: z.number().int().min(0).max(90).optional(),
   salesContact: z
@@ -144,13 +149,18 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       vipPrice: int(raw.vipPrice, d.vipPrice),
       proMonthlyCredits: int(raw.proMonthlyCredits, d.proMonthlyCredits),
       freeNests: int(raw.freeNests, d.freeNests),
+      trialDays: int(raw.trialDays, d.trialDays),
       salesContact: raw.salesContact || d.salesContact,
       discount6: int(raw.discount6, d.discount6),
       discount12: int(raw.discount12, d.discount12),
     };
   };
-  const isUnlimited = (u: UserRow): boolean => vipAll || effectivePlan(u) === 'vip';
-  const toPublic = (u: UserRow) => publicUser(u, vipAll, settings().freeNests);
+  // VIP, the promo switch, or a free account still inside its trial nest without limits.
+  const isUnlimited = (u: UserRow): boolean => {
+    const plan = effectivePlan(u);
+    return vipAll || plan === 'vip' || (plan === 'free' && trialEnd(u, settings().trialDays) > Date.now());
+  };
+  const toPublic = (u: UserRow) => publicUser(u, vipAll, settings());
   const tg = opts.telegram ? new TelegramAuth(db, opts.telegram, () => startingCredits) : null;
   const signUser = (u: UserRow): string =>
     app.jwt.sign({ sub: u.id, role: 'user' } satisfies TokenPayload, { expiresIn: '30d' });
@@ -218,6 +228,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       telegramBot: tg?.botUsername ?? null,
       plans: { pro: { price: s.proPrice, credits: s.proMonthlyCredits }, vip: { price: s.vipPrice } },
       freeNests: s.freeNests,
+      trialDays: s.trialDays,
       salesContact: s.salesContact,
       /** Percent off by period length in months (periods not listed: no discount). */
       discounts: { '6': s.discount6, '12': s.discount12 },

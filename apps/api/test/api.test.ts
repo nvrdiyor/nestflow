@@ -15,6 +15,15 @@ beforeAll(async () => {
     webDist: '', // API only in tests
   });
   await app.ready();
+  const admin = (
+    await app.inject({ method: 'POST', url: '/api/admin/login', payload: { username: 'admin', password: 'admin-pass' } })
+  ).json().token;
+  await app.inject({
+    method: 'PUT',
+    url: '/api/admin/settings',
+    headers: { authorization: `Bearer ${admin}` },
+    payload: { proPrice: 70000, vipPrice: 150000, proMonthlyCredits: 10000, freeNests: 3, trialDays: 0, salesContact: 'dior_react' },
+  });
 });
 
 afterAll(async () => {
@@ -436,12 +445,17 @@ describe('plans managed from the admin panel', () => {
       payload: { plan, months },
     });
 
-  it('gives a new account exactly 3 free nests of any size', async () => {
-    const { token, user } = await newUser('free@test.co');
+  it('gives a new account a 7-day unlimited trial', async () => {
+    const { token, user } = await newUser('trial@test.co') as { token: string; user: { credits: number; vip: boolean; plan: string; trialUntil: number } };
     expect(user.credits).toBe(0);
-    expect(user.freeLeft).toBe(3);
-    for (let i = 0; i < 3; i++) expect((await nestJob(token, 2000)).statusCode).toBe(200);
-    expect((await nestJob(token, 1)).statusCode).toBe(402);
+    expect(user.plan).toBe('free');
+    expect(user.vip).toBe(true);
+    const days = (user.trialUntil - Date.now()) / (24 * 3600 * 1000);
+    expect(days).toBeGreaterThan(6.9);
+    expect(days).toBeLessThanOrEqual(7);
+    for (let i = 0; i < 5; i++) expect((await nestJob(token, 2000)).json().cost).toBe(0);
+    const cfg = (await planApp.inject({ method: 'GET', url: '/api/config' })).json();
+    expect(cfg).toMatchObject({ trialDays: 7, freeNests: 0, plans: { pro: { price: 70000 }, vip: { price: 150000 } } });
   });
 
   it('PRO adds monthly credits spent per letter; VIP is unlimited; revoking returns to free', async () => {
@@ -463,7 +477,7 @@ describe('plans managed from the admin panel', () => {
 
     const revoked = (await grant(user.id, 'free')).json().user;
     expect(revoked.plan).toBe('free');
-    expect(revoked.vip).toBe(false);
+    expect(revoked.vip).toBe(true); // a brand-new account is still inside its trial
   });
 
   it('saves plan settings and publishes them in /api/config', async () => {
@@ -471,17 +485,22 @@ describe('plans managed from the admin panel', () => {
       method: 'PUT',
       url: '/api/admin/settings',
       headers: { authorization: `Bearer ${adminToken}` },
-      payload: { proPrice: 150000, vipPrice: 300000, proMonthlyCredits: 12000, freeNests: 5, salesContact: '@dior_react' },
+      payload: { proPrice: 70000, vipPrice: 150000, proMonthlyCredits: 12000, freeNests: 5, trialDays: 0, salesContact: '@dior_react' },
     });
     expect(saved.statusCode).toBe(200);
     const cfg = (await planApp.inject({ method: 'GET', url: '/api/config' })).json();
     expect(cfg).toMatchObject({
-      plans: { pro: { price: 150000, credits: 12000 }, vip: { price: 300000 } },
+      plans: { pro: { price: 70000, credits: 12000 }, vip: { price: 150000 } },
       freeNests: 5,
+      trialDays: 0,
       salesContact: 'dior_react',
     });
-    const { user } = await newUser('five@test.co');
+    // Trial switched off: a new account is limited to the complimentary nests.
+    const { token, user } = await newUser('five@test.co');
     expect(user.freeLeft).toBe(5);
+    expect(user.vip).toBe(false);
+    for (let i = 0; i < 5; i++) expect((await nestJob(token, 300)).json().cost).toBe(0);
+    expect((await nestJob(token, 300)).statusCode).toBe(402);
   });
 
   it('refuses plan changes without an admin token', async () => {
