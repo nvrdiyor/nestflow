@@ -46,6 +46,12 @@ export function checkPlacement(result: NestResult, parts: Part[], index: number,
   // Grow the WHOLE contour (outer out, holes in) by the gap: a neighbour may
   // legitimately sit inside one of this part's holes.
   const grown = gap > 0 ? offsetRegionClipper([c], gap - 0.01, 0.005) : [c];
+  // Already-cut area of a remnant sheet.
+  for (const ring of result.config.remnants?.[candidate.sheet]?.blocked ?? []) {
+    const rb = ringBounds(ring);
+    if (rb.minX > b.maxX + gap || rb.maxX < b.minX - gap || rb.minY > b.maxY + gap || rb.maxY < b.minY - gap) continue;
+    if (regionArea(intersection(grown, [{ outer: ring, holes: [] }])) > 0.05) return 'overlap';
+  }
   for (let j = 0; j < result.placements.length; j++) {
     if (j === index) continue;
     const other = result.placements[j]!;

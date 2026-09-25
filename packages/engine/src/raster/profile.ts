@@ -35,8 +35,12 @@ export interface BandProfile {
   cellArea: number;
 }
 
-/** Exact x-projection of every ring's material inside each band, via one edge sweep. */
-export function bandProfile(region: Region, h: number): BandProfile | null {
+/**
+ * Exact x-projection of every ring's material inside each band, via one edge
+ * sweep. `originY` (≤ the shape's top) pins row 0 to a given grid line — used
+ * for fixed obstacles that must sit on the sheet's own band grid.
+ */
+export function bandProfile(region: Region, h: number, originY?: number): BandProfile | null {
   const rings: Ring[] = [];
   for (const c of region) {
     if (c.outer.length >= 3) rings.push(c.outer);
@@ -57,6 +61,7 @@ export function bandProfile(region: Region, h: number): BandProfile | null {
     }
   }
   if (!Number.isFinite(minX) || maxX - minX <= 0 || maxY - minY <= 0) return null;
+  if (originY !== undefined && originY < minY) minY = originY;
 
   const rows = Math.max(1, Math.ceil((maxY - minY) / h - 1e-9));
   const rowIv: number[][] = new Array(rows);

@@ -1,7 +1,7 @@
 import type { Contour, NestResult, Part, Placement, Point, Ring } from '../types.js';
 import type { CutPlan } from '../cutpath/types.js';
 import { orientContour } from '../model/prepared.js';
-import { contourArea, translateContour } from '../geometry/polygon.js';
+import { contourArea, ringArea, translateContour } from '../geometry/polygon.js';
 
 /**
  * Reconstructs the true world-space geometry of a placement from its source part.
@@ -141,8 +141,10 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
 
   // Per-sheet utilization: this sheet's part area over its plate area (the
   // global metric repeated on every sheet misreads as identical fill levels).
-  const sheetUtilPct = (placements: Placement[]): string => {
+  const remnants = result.config.remnants ?? [];
+  const sheetUtilPct = (placements: Placement[], s: number): string => {
     let area = 0;
+    for (const r of remnants[s]?.blocked ?? []) area += ringArea(r);
     for (const pl of placements) {
       const part = partMap.get(pl.partId);
       if (part) area += Math.abs(contourArea(part.contour));
@@ -166,6 +168,19 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
           ).toFixed(2)}" height="${(sheetH - 2 * margin).toFixed(2)}" fill="none" stroke="${C.margin}" stroke-width="${stroke}" stroke-dasharray="${(stroke * 4).toFixed(2)}"/>`,
         );
       }
+    }
+    const blocked = remnants[s]?.blocked ?? [];
+    if (blocked.length) {
+      // Already-cut area of a remnant: hatched, never exported.
+      const hid = `nfh${s}`;
+      const step = Math.max(sheetW, sheetH) / 120;
+      const ink = light ? '#9ca3af' : '#475569';
+      svg.push(
+        `<defs><pattern id="${hid}" patternUnits="userSpaceOnUse" width="${step.toFixed(2)}" height="${step.toFixed(2)}" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="${step.toFixed(2)}" stroke="${ink}" stroke-width="${(step / 4).toFixed(2)}"/></pattern></defs>`,
+      );
+      svg.push(
+        `<path class="nf-used" d="${blocked.map((r) => ringPath(r, ox, oy)).join(' ')}" fill="url(#${hid})" stroke="${ink}" stroke-width="${(stroke * 0.6).toFixed(3)}" fill-rule="nonzero"/>`,
+      );
     }
     for (const placement of bySheet[s] as Placement[]) {
       const part = partMap.get(placement.partId);
@@ -213,7 +228,7 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
     }
 
     if (labels) {
-      const util = sheetUtilPct(bySheet[s] as Placement[]);
+      const util = sheetUtilPct(bySheet[s] as Placement[], s);
       const caption = options.sheetLabel ? options.sheetLabel(s + 1, util) : `Sheet ${s + 1} — ${util}% used`;
       svg.push(
         `<text x="${ox.toFixed(2)}" y="${(oy - labelH * 0.3).toFixed(

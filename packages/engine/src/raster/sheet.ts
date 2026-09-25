@@ -163,13 +163,14 @@ export class BandSheet {
     return tx;
   }
 
-  /** Marks profile `p` at (k, tx) as occupied. */
-  insert(p: BandProfile, k: number, tx: number): void {
+  /** Marks profile `p` at (k, tx) as occupied (`count` = false for fixed obstacles). */
+  insert(p: BandProfile, k: number, tx: number, count = true): void {
     const { off, iv, rows } = p;
     for (let j = 0; j < rows; j++) {
       const qEnd = off[j + 1]!;
       if (off[j]! === qEnd) continue;
       const kb = k + j;
+      if (kb < 0 || kb >= this.bandCount) continue;
       const band = this.bands[kb]!;
       for (let q = off[j]!; q < qEnd; q++) insertInterval(band, iv[2 * q]! + tx, iv[2 * q + 1]! + tx);
       let widest = 0;
@@ -185,7 +186,7 @@ export class BandSheet {
         this.gapTree.set(kb, widest);
       }
     }
-    this.usedCellArea += p.cellArea;
+    if (count) this.usedCellArea += p.cellArea;
   }
 }
 

@@ -99,6 +99,7 @@ export function nest(parts: Part[], config: NestConfig): NestResult {
       localSearch: strategy !== 'fast',
       ...(config.lane !== undefined ? { lane: config.lane } : {}),
       ...(config.bandHeight !== undefined ? { bandHeight: config.bandHeight } : {}),
+      ...(config.remnants?.length ? { remnants: config.remnants } : {}),
       ...(config.onProgress ? { onProgress: config.onProgress } : {}),
       ...(onImprove ? { onImprove } : {}),
     });

@@ -1,4 +1,4 @@
-import type { Bounds } from '../types.js';
+import type { Bounds, Remnant } from '../types.js';
 import type { PartInstance } from '../model/prepared.js';
 import type { GreedyResult } from '../placement/greedy.js';
 import { fitnessOf } from '../search/fitness.js';
@@ -19,6 +19,7 @@ export interface RasterSearchOptions {
   /** Parallel lane: rotates the seed plan so lanes start from different layouts. */
   lane?: number;
   bandHeight?: number;
+  remnants?: Remnant[];
   onProgress?: (fraction: number, bestFitness: number) => void;
   /** Called with every new best layout (live preview). */
   onImprove?: (result: GreedyResult, fitness: number, iterations: number) => void;
@@ -155,6 +156,7 @@ export function runRasterSearch(instances: PartInstance[], opts: RasterSearchOpt
     clearance: opts.clearance,
     holeFilling: opts.holeFilling,
     ...(opts.bandHeight !== undefined ? { bandHeight: opts.bandHeight } : {}),
+    ...(opts.remnants?.length ? { remnants: opts.remnants } : {}),
     onTick: progress,
   });
 

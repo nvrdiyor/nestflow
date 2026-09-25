@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Contour, NestConfig, Part, Ring } from '../src/types.js';
 import { Rng } from '../src/rng.js';
-import { nest, placementContour } from '../src/index.js';
+import { nest, placementContour, remnantFromSheet } from '../src/index.js';
 import { bandProfile } from '../src/raster/profile.js';
 import { BandSheet } from '../src/raster/sheet.js';
 import { convexHull, intersection, regionArea, ringBounds } from '../src/geometry/index.js';
@@ -142,5 +142,39 @@ describe('raster engine (default nest)', () => {
     expect(result.placements.length + result.unplaced.length).toBe(600);
     expect(result.unplaced).toHaveLength(0);
     expect(gapViolations(parts, result, 2)).toBe(0);
+  });
+  it('fills a remnant first and keeps the full gap to its used area', () => {
+    const rng = new Rng(7);
+    const parts: Part[] = [];
+    for (let i = 0; i < 12; i++) parts.push(randomConvex(rng, `r${i}`, 20 + rng.next() * 30, 4));
+    // Left 60% of the sheet is already cut away (an L-shaped used area).
+    const used: Ring = [
+      { x: 0, y: 0 }, { x: 360, y: 0 }, { x: 360, y: 150 }, { x: 250, y: 150 }, { x: 250, y: 400 }, { x: 0, y: 400 },
+    ];
+    const config: NestConfig = {
+      sheet: { width: 600, height: 400, margin: 5 },
+      units: 'mm',
+      rotations: [0, 90, 180, 270],
+      spacing: 3,
+      kerf: 0.2,
+      strategy: 'fast',
+      remnants: [{ blocked: [used] }],
+    };
+    const result = nest(parts, config);
+    expect(result.unplaced).toHaveLength(0);
+    const onRemnant = result.placements.filter((p) => p.sheet === 0);
+    expect(onRemnant.length).toBeGreaterThan(5);
+    // True gap to the used area ≥ spacing + kerf (minus a hair).
+    const map = new Map(parts.map((p) => [p.id, p]));
+    const guard = offsetRegionClipper([{ outer: used, holes: [] }], 3.2 - 0.01, 0.001);
+    for (const pl of onRemnant) {
+      const c = placementContour(map.get(pl.partId)!, pl);
+      expect(regionArea(intersection(guard, [c]))).toBeLessThan(1e-6);
+    }
+    expect(gapViolations(parts, result, 3.2)).toBe(0);
+    // The leftover of sheet 0 again blocks everything cut there.
+    const next = remnantFromSheet(result, parts, 0);
+    const covered = regionArea(next.blocked.map((outer) => ({ outer, holes: [] })));
+    expect(covered).toBeGreaterThan(360 * 150 + 250 * 250 - 1);
   });
 });

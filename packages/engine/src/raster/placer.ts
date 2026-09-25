@@ -68,6 +68,12 @@ export function rasterPlace(
     result.sheets.push(st.layout);
     return st;
   };
+  // Remnants come first, with their used areas blocked; fresh sheets follow.
+  const fixedSheets = model.remnants.length;
+  for (const rem of model.remnants) {
+    const st = newSheet();
+    if (rem) st.grid.insert(rem.prof, rem.k, 0, false);
+  }
 
   const bestOn = (st: SheetState, options: RasterShape[]): Choice | null => {
     let best: Choice | null = null;
@@ -162,7 +168,7 @@ export function rasterPlace(
       }
     }
     if (!placed) {
-      if (sheets.length >= opts.sheetLimit) {
+      if (sheets.length >= opts.sheetLimit + fixedSheets) {
         result.unplaced.push({ partId: inst.part.id, instance: inst.instance, reason: 'sheet-limit' });
       } else {
         const st = newSheet();

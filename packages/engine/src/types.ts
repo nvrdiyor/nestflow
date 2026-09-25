@@ -82,6 +82,17 @@ export interface SheetSpec {
   quantity?: number;
 }
 
+/**
+ * A partly used sheet (remnant / offcut) of the job's sheet size. `blocked`
+ * outlines what is no longer material there — parts cut earlier (their outer
+ * outline: the pieces fell out, counters included) or a sawn-off area — in
+ * sheet coordinates. New parts keep the full clearance from them.
+ */
+export interface Remnant {
+  blocked: Ring[];
+  label?: string;
+}
+
 /** Machine parameters used for cut-time and cost estimation. */
 export interface MachineSpec {
   /** Cutting feed rate along contours, engine units per second. */
@@ -133,6 +144,11 @@ export interface NestConfig {
    * it with a distinct `seed` per lane and keep the result with the lowest score.
    */
   lane?: number;
+  /**
+   * Remnants to fill FIRST: sheets 0…n-1 of the layout are these partly used
+   * sheets (same size as `sheet`), fresh sheets follow. Raster engine only.
+   */
+  remnants?: Remnant[];
   /** Machine parameters for costing. */
   machine?: MachineSpec;
   /** Progress callback invoked during search (0..1). */

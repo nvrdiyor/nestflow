@@ -1,4 +1,4 @@
-import type { Bounds, Contour, Region } from '../types.js';
+import type { Bounds, Contour, Region, Remnant } from '../types.js';
 import type { OrientedShape, PartInstance, PreparedPart } from '../model/prepared.js';
 import { contourPerimeter, mirrorContour, ringArea, ringBounds, rotateContour } from '../geometry/polygon.js';
 import { simplifyRing } from '../geometry/simplify.js';
@@ -31,6 +31,8 @@ export interface RasterModel {
   /** Per instance index → its part model. */
   byInstance: RasterPartModel[];
   parts: RasterPartModel[];
+  /** Per remnant: its blocked area (grown by the clearance) on the band grid, at band `k`. */
+  remnants: Array<{ prof: BandProfile; k: number } | null>;
 }
 
 export interface RasterModelOptions {
@@ -40,6 +42,8 @@ export interface RasterModelOptions {
   holeFilling: boolean;
   /** Band height override (mm). */
   bandHeight?: number;
+  /** Partly used sheets that open the layout. */
+  remnants?: Remnant[];
   onTick?: () => void;
 }
 
@@ -105,7 +109,23 @@ export function buildRasterModel(instances: PartInstance[], opts: RasterModelOpt
     shapeCount: 0,
     byInstance: [],
     parts: [],
+    remnants: [],
   };
+  // Remnant obstacles: grown by the same clearance as a part, so the gap to an
+  // earlier cut is the full spacing + kerf; profiled on the sheet's band grid.
+  for (const rem of opts.remnants ?? []) {
+    const base: Region = rem.blocked.filter((r) => r.length >= 3).map((outer) => ({ outer, holes: [] }));
+    const grown = base.length ? offsetRegionClipper(base, opts.clearance + ARC_TOL_MM, ARC_TOL_MM) : [];
+    let top = Infinity;
+    for (const c of grown) for (const p of c.outer) if (p.y < top) top = p.y;
+    if (!grown.length || !Number.isFinite(top)) {
+      model.remnants.push(null);
+      continue;
+    }
+    const k = Math.floor((top - usable.minY) / h);
+    const prof = bandProfile(grown, h, usable.minY + k * h);
+    model.remnants.push(prof ? { prof, k } : null);
+  }
   const seen = new Map<PreparedPart, RasterPartModel>();
 
   for (const inst of instances) {

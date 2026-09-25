@@ -1,6 +1,8 @@
 import {
   cutMetrics,
   planCutPath,
+  remnantFreeFraction,
+  remnantFromSheet,
   resultToSVG,
   ringBounds,
   type Contour,
@@ -16,6 +18,7 @@ import { importDxfParts } from '../dxfImport';
 import { exportDxf } from '../exporters';
 import { openReport } from '../report';
 import { attachEditor, type Editor } from '../editor';
+import * as store from '../store';
 import { appNavMarkup, pillMarkup } from '../ui/nav';
 import { openPlans } from '../ui/plans';
 import * as api from '../api';
@@ -49,6 +52,10 @@ interface SavedWork {
   lastResult: NestResult | null;
   lastPlans: CutPlan[];
   mirrorMode: string;
+  runId: string | null;
+  remnantId: string;
+  resultRemnantId: string | null;
+  resultFit: boolean;
 }
 let savedWork: SavedWork | null = null;
 
@@ -99,6 +106,13 @@ const toolMarkup = (): string => `
         <label class="field"><span>${t('app.sheetCost')}</span><input id="sheetCost" type="number" value="45" min="0" step="1" /></label>
       </div>
       <label class="check" style="margin-top:10px"><input id="fitSheet" type="checkbox" /> <span>${t('app.fitSheet')}</span></label>
+      <div class="rem-row">
+        <label class="field"><span>${t('rem.label')}</span>
+          <select id="remnantSel"><option value="">${t('rem.none')}</option></select>
+        </label>
+        <button type="button" id="remnantDel" class="icon-btn" title="${t('rem.delete')}" aria-label="${t('rem.delete')}" hidden>✕</button>
+      </div>
+      <div id="remnantThumb" class="rem-thumb" hidden></div>
     </section>
     <section class="group">
       <h2>${t('app.cutting')}</h2>
@@ -125,7 +139,12 @@ const toolMarkup = (): string => `
         <button id="exportDxf" class="secondary" disabled>${t('app.downloadDxf')}</button>
         <button id="exportPdf" class="secondary" disabled>${t('app.downloadPdf')}</button>
       </div>
+      <button id="saveRemnant" class="secondary rem-save" disabled>${t('rem.save')}</button>
     </section>
+    <details class="group hist" id="histBox">
+      <summary><h2>${t('hist.title')} <span id="histCount"></span></h2></summary>
+      <div id="histList" class="hist-list"></div>
+    </details>
   </aside>
   <section class="stage">
     <div class="metrics" id="metrics"></div>
@@ -177,7 +196,15 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   let busy = false;
   let watchdog = 0;
   let unit: 'mm' | 'cm' = 'mm';
-  let runCtx: { instances: number; strategy: Strategy; cost: number; parts: Part[] } | null = null;
+  let runCtx: { instances: number; strategy: Strategy; cost: number; parts: Part[]; remnantId: string | null } | null = null;
+  // History id of the job on screen (hand edits update that entry).
+  let runId: string | null = savedWork?.runId ?? null;
+  let remnantList: store.RemnantEntry[] = [];
+  // The remnant the on-screen result was nested on, and whether it is a fit-to-parts crop.
+  let resultRemnantId: string | null = savedWork?.resultRemnantId ?? null;
+  let resultFit = savedWork?.resultFit ?? false;
+  const esc = (s: string): string =>
+    s.replace(/[&<>"']/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'));
 
   const statusEl = el('status');
   const statusMsg = (text: string, isError = false): void => {
@@ -191,6 +218,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const exportDxfBtn = el<HTMLButtonElement>('exportDxf');
   const exportPdfBtn = el<HTMLButtonElement>('exportPdf');
   const editBtn = root.querySelector<HTMLButtonElement>('.js-edit')!;
+  const saveRemnantBtn = el<HTMLButtonElement>('saveRemnant');
+  const remnantSel = el<HTMLSelectElement>('remnantSel');
   let editor: Editor;
 
   type MirrorMode = 'off' | 'auto' | 'all';
@@ -224,7 +253,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   const instanceCount = (parts: Part[]): number => parts.reduce((s, p) => s + (p.quantity ?? 1), 0);
 
-  const fitEnabled = (): boolean => checked('fitSheet');
+  const currentRemnant = (): store.RemnantEntry | null =>
+    remnantList.find((r) => r.id === remnantSel.value) ?? null;
+  // A remnant has its own fixed size — fit-to-parts does not apply there.
+  const fitEnabled = (): boolean => checked('fitSheet') && !currentRemnant();
 
   /** mm per displayed unit — every length input is shown in `unit`. */
   const unitFactor = (): number => (unit === 'cm' ? 10 : 1);
@@ -236,11 +268,15 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const currentConfig = (): NestConfig => {
     // In fit-to-parts mode the packer runs on a generous auto-sized sheet so it
     // clusters everything on one sheet; the result is then cropped to the pack.
-    const sheet = fitEnabled()
-      ? { ...estimateSheet(currentParts()), margin: toMm('margin'), cost: num('sheetCost') }
-      : { width: toMm('sheetW'), height: toMm('sheetH'), margin: toMm('margin'), cost: num('sheetCost') };
+    const rem = currentRemnant();
+    const sheet = rem
+      ? { width: rem.width, height: rem.height, margin: rem.margin, cost: num('sheetCost') }
+      : fitEnabled()
+        ? { ...estimateSheet(currentParts()), margin: toMm('margin'), cost: num('sheetCost') }
+        : { width: toMm('sheetW'), height: toMm('sheetH'), margin: toMm('margin'), cost: num('sheetCost') };
     return {
       sheet,
+      ...(rem ? { remnants: [{ blocked: rem.blocked, label: rem.name }] } : {}),
       units: 'mm',
       rotations: checked('allowRot') ? ROTATIONS : [0],
       allowMirror: mirrorMode() === 'auto', // per-part, only where it helps
@@ -289,7 +325,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     exportDxfBtn.disabled = true;
     exportPdfBtn.disabled = true;
     editBtn.disabled = true;
+    saveRemnantBtn.disabled = true;
     lastResult = null;
+    runId = null;
     statusEl.textContent = parts.length ? label : '';
     updateCostLabel();
   };
@@ -345,9 +383,13 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   // Sheet W/H are auto-computed in fit mode, so grey the inputs out.
   const syncSheetInputs = (): void => {
-    const disabled = fitEnabled();
+    const rem = currentRemnant();
+    const disabled = fitEnabled() || rem !== null;
     el<HTMLInputElement>('sheetW').disabled = disabled;
     el<HTMLInputElement>('sheetH').disabled = disabled;
+    el<HTMLInputElement>('margin').disabled = rem !== null;
+    el<HTMLInputElement>('fitSheet').disabled = rem !== null;
+    el('remnantDel').hidden = rem === null;
   };
 
   const metricCard = (label: string, value: string, good = false): string =>
@@ -401,6 +443,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     exportDxfBtn.disabled = false;
     exportPdfBtn.disabled = false;
     editBtn.disabled = false;
+    saveRemnantBtn.disabled = resultFit || r.placements.length === 0;
   };
 
   // Parallel search lanes: every lane runs the same job from different seed
@@ -492,7 +535,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     }
     busy = true;
     runBtn.disabled = true;
-    runCtx = { instances, strategy: STRATEGY, cost, parts };
+    runCtx = { instances, strategy: STRATEGY, cost, parts, remnantId: currentRemnant()?.id ?? null };
     statusMsg(t('app.nesting', { n: instances, s: STRATEGY }));
     showVeil();
     previewScore = Number.POSITIVE_INFINITY;
@@ -572,6 +615,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
         const fresh = api.cachedUser();
         if (fresh) refreshPill(fresh);
         lastParts = ctx.parts;
+        resultRemnantId = ctx.remnantId;
       } catch (err) {
         busy = false;
         runBtn.disabled = false;
@@ -594,9 +638,12 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     busy = false;
     runBtn.disabled = false;
     // Crop the sheet to the packed parts for a clean, full layout (auto-size).
-    const out = fitEnabled() ? fitToParts(r, lastParts, toMm('margin')) : r;
+    resultFit = fitEnabled();
+    const out = resultFit ? fitToParts(r, lastParts, toMm('margin')) : r;
     render(out);
     hideVeil(true);
+    runId = store.newId();
+    saveRun(out);
     if (best.overlaps > 0) {
       statusMsg(t('app.overlapWarn', { n: best.overlaps }), true);
     } else {
@@ -814,6 +861,180 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (lastResult) render(lastResult);
   });
 
+  // ---- remnants: the leftover of a sheet, filled first by a later job ----
+  const remnantThumb = (rem: store.RemnantEntry): string => {
+    const d = rem.blocked
+      .map((r) => r.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ') + 'Z')
+      .join(' ');
+    const sw = Math.max(rem.width, rem.height) / 150;
+    return `<svg viewBox="${-sw} ${-sw} ${rem.width + 2 * sw} ${rem.height + 2 * sw}" xmlns="http://www.w3.org/2000/svg"><rect width="${rem.width}" height="${rem.height}" fill="#111827" stroke="#334155" stroke-width="${sw}"/><path d="${d}" fill="#475569"/></svg>`;
+  };
+  const remnantLabel = (r: store.RemnantEntry): string => (r.sheet ? `${r.name} · ${t('rem.sheetN', { n: r.sheet })}` : r.name);
+  const showRemnant = (): void => {
+    const rem = currentRemnant();
+    const thumb = el('remnantThumb');
+    thumb.hidden = rem === null;
+    if (rem) {
+      setLen('sheetW', rem.width);
+      setLen('sheetH', rem.height);
+      setLen('margin', rem.margin);
+      el<HTMLInputElement>('fitSheet').checked = false;
+      thumb.innerHTML = remnantThumb(rem) + `<p class="hint">${t('rem.hint')}</p>`;
+    } else {
+      thumb.innerHTML = '';
+    }
+    syncSheetInputs();
+    updateCostLabel();
+  };
+  const refreshRemnants = async (keep?: string): Promise<void> => {
+    remnantList = await store.listRemnants();
+    const want = keep ?? remnantSel.value;
+    remnantSel.innerHTML =
+      `<option value="">${esc(t('rem.none'))}</option>` +
+      remnantList
+        .map(
+          (r) =>
+            `<option value="${r.id}">${esc(remnantLabel(r))} · ${Math.round(r.width)}×${Math.round(r.height)} · ${Math.round(r.free * 100)}% ${esc(t('rem.free'))}</option>`,
+        )
+        .join('');
+    remnantSel.value = remnantList.some((r) => r.id === want) ? want : '';
+    showRemnant();
+  };
+  remnantSel.addEventListener('change', () => {
+    showRemnant();
+    if (currentParts().length && !busy) showPreview(readyLabel());
+  });
+  el('remnantDel').addEventListener('click', () => {
+    const rem = currentRemnant();
+    if (!rem || !window.confirm(t('rem.confirmDel', { name: remnantLabel(rem) }))) return;
+    void store.deleteRemnant(rem.id).then(() => refreshRemnants(''));
+  });
+  saveRemnantBtn.addEventListener('click', () => {
+    if (!lastResult || resultFit) return;
+    const r = lastResult;
+    const sheet = Math.max(0, r.sheetsUsed - 1);
+    const rem = remnantFromSheet(r, lastParts, sheet);
+    const { width, height, margin = 0 } = r.config.sheet;
+    const free = remnantFreeFraction(rem, width, height, margin);
+    const entry: store.RemnantEntry = {
+      id: store.newId(),
+      at: Date.now(),
+      name: importedName || 'Tasvir AI',
+      sheet: sheet + 1,
+      width,
+      height,
+      margin,
+      blocked: rem.blocked,
+      free,
+    };
+    saveRemnantBtn.disabled = true;
+    // The remnant this job was nested on is used up now — the new entry replaces it.
+    const used = resultRemnantId;
+    resultRemnantId = null;
+    void (async () => {
+      await store.saveRemnant(entry);
+      if (used) await store.deleteRemnant(used);
+      await refreshRemnants(used && remnantSel.value === used ? '' : undefined);
+      statusMsg(t('rem.saved', { n: sheet + 1, free: Math.round(free * 100) }));
+    })();
+  });
+
+  // ---- history: every finished job, reopened without paying again ----
+  const saveRun = (r: NestResult): void => {
+    if (!runId || !importedText) return;
+    void store
+      .saveHistory({
+        id: runId,
+        at: Date.now(),
+        name: importedName || 'Tasvir AI',
+        text: importedText,
+        scale: importScale,
+        mirror: mirrorMode(),
+        result: r,
+        parts: r.placements.length,
+        sheets: r.sheetsUsed,
+        util: r.metrics.utilization,
+      })
+      .then(() => refreshHistory());
+  };
+  let saveEditTimer = 0;
+  const saveEdit = (r: NestResult): void => {
+    clearTimeout(saveEditTimer);
+    saveEditTimer = window.setTimeout(() => saveRun(r), 800);
+  };
+  const fmtWhen = (ts: number): string => {
+    const d = new Date(ts);
+    const p = (n: number): string => String(n).padStart(2, '0');
+    return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const refreshHistory = async (): Promise<void> => {
+    const list = await store.listHistory();
+    el('histCount').textContent = list.length ? `(${list.length})` : '';
+    el('histList').innerHTML = list.length
+      ? list
+          .map(
+            (h) => `<div class="hist-item${h.id === runId ? ' current' : ''}" data-id="${h.id}">
+          <div class="hi-main"><b title="${esc(h.name)}">${esc(h.name)}</b>
+            <small>${fmtWhen(h.at)}</small>
+            <small>${esc(t('hist.meta', { parts: h.parts, sheets: h.sheets, util: (h.util * 100).toFixed(1) }))}</small></div>
+          <button type="button" class="hi-open">${esc(t('hist.open'))}</button>
+          <button type="button" class="hi-del icon-btn" title="${esc(t('hist.delete'))}" aria-label="${esc(t('hist.delete'))}">✕</button>
+        </div>`,
+          )
+          .join('')
+      : `<p class="hint">${esc(t('hist.empty'))}</p>`;
+  };
+  const restoreHistory = (h: store.HistoryEntry): void => {
+    if (busy) return;
+    const c = h.result.config;
+    // The settings the job was nested with.
+    remnantSel.value = '';
+    el<HTMLInputElement>('fitSheet').checked = false;
+    setLen('sheetW', c.sheet.width);
+    setLen('sheetH', c.sheet.height);
+    setLen('margin', c.sheet.margin ?? 0);
+    setLen('spacing', c.spacing ?? 0);
+    el<HTMLInputElement>('kerf').value = String(c.kerf ?? 0);
+    el<HTMLInputElement>('holeFilling').checked = c.holeFilling === true;
+    el<HTMLInputElement>('allowRot').checked = (c.rotations?.length ?? 1) > 1;
+    const preset =
+      c.sheet.width === 1210 && c.sheet.height === 900 ? 'laser' : c.sheet.width === 2400 && c.sheet.height === 1200 ? 'rover' : 'custom';
+    el<HTMLSelectElement>('machinePreset').value = preset;
+    el<HTMLSelectElement>('mirrorMode').value = h.mirror || 'off';
+    showRemnant();
+    importScale = h.scale;
+    loadFile(h.text, h.name);
+    const parts = nestParts();
+    const ids = new Set(parts.map((p) => p.id));
+    if (!h.result.placements.every((p) => ids.has(p.partId))) {
+      statusMsg(t('hist.mismatch'), true);
+      return;
+    }
+    lastParts = parts;
+    resultRemnantId = null;
+    resultFit = false;
+    runId = h.id;
+    render(h.result);
+    statusMsg(t('hist.restored', { name: h.name }));
+    void refreshHistory();
+  };
+  el('histList').addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    const item = target.closest<HTMLElement>('.hist-item');
+    if (!item) return;
+    const id = item.dataset.id ?? '';
+    if (target.closest('.hi-del')) {
+      void store.deleteHistory(id).then(() => refreshHistory());
+      return;
+    }
+    if (target.closest('.hi-open')) {
+      void store.listHistory().then((list) => {
+        const h = list.find((x) => x.id === id);
+        if (h) restoreHistory(h);
+      });
+    }
+  });
+
   // Nav
   root.querySelector('.js-home')?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -849,11 +1070,15 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     active: () => editMode && !busy && lastResult !== null,
     result: () => lastResult,
     parts: () => lastParts,
-    gap: () => toMm('spacing') + num('kerf'),
+    gap: () => {
+      const c = lastResult?.config;
+      return c ? (c.spacing ?? 0) + (c.kerf ?? 0) : toMm('spacing') + num('kerf');
+    },
     commit: (next, index) => {
       render(next, true);
       editor.select(index);
       statusMsg(t('app.editSaved'));
+      saveEdit(next);
     },
     reject: (verdict) => statusMsg(t(verdict === 'outside' ? 'app.editOutside' : 'app.editOverlap'), true),
   });
@@ -863,6 +1088,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // Restore work that survived a re-render (e.g. a language switch): the mirror
   // state must be restored BEFORE rendering so a mirrored result is redrawn with
   // mirrored sources, and the paid result reappears instead of a blank preview.
+  const keepRemnant = savedWork?.remnantId ?? '';
+  void refreshRemnants(keepRemnant);
+  void refreshHistory();
   if (savedWork) {
     el<HTMLSelectElement>('mirrorMode').value = savedWork.mirrorMode || 'off';
     if (savedWork.importInfo) importInfo.textContent = savedWork.importInfo;
@@ -876,7 +1104,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   updateCostLabel();
   syncSheetInputs();
   if (lastResult) {
+    const keepRun = runId;
     render(lastResult);
+    runId = keepRun;
     statusEl.textContent = readyLabel();
   } else {
     showPreview(readyLabel());
@@ -903,6 +1133,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   return () => {
     disarmWatchdog();
     stopPreview();
+    clearTimeout(saveEditTimer);
     workers.forEach((w) => w.terminate());
     editor.destroy();
     zoom?.destroy();
@@ -921,6 +1152,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       lastResult,
       lastPlans,
       mirrorMode: mirrorMode(),
+      runId,
+      remnantId: remnantSel.value,
+      resultRemnantId,
+      resultFit,
     };
   };
 }
