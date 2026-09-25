@@ -238,6 +238,13 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     };
   });
 
+  // Real usage totals for the landing page (cached — it is hit by every visitor).
+  let statsCache: { at: number; value: { users: number; nests: number; parts: number } } | null = null;
+  app.get('/api/stats', async () => {
+    if (!statsCache || Date.now() - statsCache.at > 5 * 60_000) statsCache = { at: Date.now(), value: db.publicStats() };
+    return statsCache.value;
+  });
+
   // ---------- auth ----------
   app.post('/api/auth/register', authLimit, async (req, reply) => {
     const parsed = registerSchema.safeParse(req.body);

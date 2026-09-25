@@ -317,6 +317,13 @@ export class Db {
     return { users, activeToday, nests, creditsUsed };
   }
 
+  /** Totals shown on the public landing page. */
+  publicStats(): { users: number; nests: number; parts: number } {
+    const users = (this.db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+    const row = this.db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(parts), 0) AS p FROM usage').get() as { n: number; p: number };
+    return { users, nests: row.n, parts: row.p };
+  }
+
   close(): void {
     this.db.close();
   }

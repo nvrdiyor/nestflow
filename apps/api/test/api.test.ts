@@ -603,3 +603,14 @@ describe('file conversion', () => {
     expect(page.svg).not.toContain('svg:');
   });
 });
+
+describe('public stats', () => {
+  it('reports real totals without any personal data', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/stats' });
+    expect(res.statusCode).toBe(200);
+    const s = res.json();
+    expect(Object.keys(s).sort()).toEqual(['nests', 'parts', 'users']);
+    expect(s.users).toBeGreaterThan(0);
+    expect(s.parts).toBeGreaterThanOrEqual(s.nests);
+  });
+});

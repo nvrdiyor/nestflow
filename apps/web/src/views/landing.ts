@@ -1,5 +1,5 @@
 import { isLoggedIn } from '../api';
-import { getConfig } from '../api';
+import { getConfig, getStats } from '../api';
 import { fmtSum, periodPickerMarkup, salesLink, wirePeriods } from '../ui/plans';
 import { langSwitchMarkup, t, wireLangSwitch } from '../i18n';
 
@@ -118,6 +118,7 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
       <a class="brand js-home" href="#/"><span class="logo">◧</span><div>Tasvir&nbsp;AI</div></a>
       <div class="lnav-links">
         <a data-goto="features">${t('l.navFeatures')}</a>
+        <a data-goto="roi">${t('roi.nav')}</a>
         <a data-goto="pricing">${t('l.navPricing')}</a>
         <a data-goto="faq">${t('l.navFaq')}</a>
         <a href="${GITHUB}#readme" target="_blank" rel="noopener">${t('l.navDocs')}</a>
@@ -159,6 +160,7 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
       <div class="wordmarks">
         <span>CorelDRAW</span><span>Illustrator</span><span>AutoCAD</span><span>LightBurn</span><span>Inkscape</span><span>PDF</span><span>DXF</span><span>DWG</span>
       </div>
+      <p class="live-stats js-live" hidden></p>
     </div>
   </section>
 
@@ -195,6 +197,27 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
         </div>
       </div>
       <p class="cmp-note rv">${t('l.cmpNote')}</p>
+    </div>
+  </section>
+
+  <section class="section" id="roi">
+    <div class="container">
+      <div class="section-head rv"><h2>${t('roi.title')}</h2><p>${t('roi.sub')}</p></div>
+      <div class="roi rv">
+        <div class="roi-in">
+          <label class="roi-f"><span>${t('roi.sheets')}</span><input type="number" class="js-roi-sheets" value="30" min="1" max="100000" step="1" inputmode="numeric" /></label>
+          <label class="roi-f"><span>${t('roi.price')}</span><input type="number" class="js-roi-price" value="300000" min="0" step="10000" inputmode="numeric" /></label>
+          <label class="roi-f"><span>${t('roi.now')} <b class="js-roi-now-v">60%</b></span><input type="range" class="js-roi-now" min="30" max="90" value="60" /></label>
+          <label class="roi-f"><span>${t('roi.new')} <b class="js-roi-new-v">75%</b></span><input type="range" class="js-roi-new" min="30" max="95" value="75" /></label>
+        </div>
+        <div class="roi-out">
+          <div class="roi-k">${t('roi.savedSheets')}</div><div class="roi-v js-roi-sheets-out">—</div>
+          <div class="roi-k">${t('roi.savedMonth')}</div><div class="roi-v big js-roi-month">—</div>
+          <div class="roi-k">${t('roi.savedYear')}</div><div class="roi-v js-roi-year">—</div>
+          <div class="roi-pay js-roi-pay"></div>
+        </div>
+      </div>
+      <p class="cmp-note rv">${t('roi.note', { n: '<span class="js-free-n">7</span>' })}</p>
     </div>
   </section>
 
@@ -266,8 +289,44 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
     navigate(h);
   };
   root.querySelectorAll<HTMLElement>('.js-start, .js-start-p').forEach((b) => b.addEventListener('click', go('#/login')));
+  // ---- savings calculator: the user's own numbers, plain arithmetic ----
+  let proPrice = 70_000;
+  const roiEl = <T extends HTMLElement>(sel: string): T => root.querySelector<T>(sel)!;
+  const roi = (): void => {
+    const sheets = Math.max(0, Number(roiEl<HTMLInputElement>('.js-roi-sheets').value) || 0);
+    const price = Math.max(0, Number(roiEl<HTMLInputElement>('.js-roi-price').value) || 0);
+    const now = Number(roiEl<HTMLInputElement>('.js-roi-now').value) || 60;
+    const next = Number(roiEl<HTMLInputElement>('.js-roi-new').value) || 75;
+    roiEl('.js-roi-now-v').textContent = `${now}%`;
+    roiEl('.js-roi-new-v').textContent = `${next}%`;
+    // The same parts need area/fill of material: fewer sheets at a higher fill.
+    const saved = next > now ? sheets * (1 - now / next) : 0;
+    const month = saved * price;
+    roiEl('.js-roi-sheets-out').textContent = saved.toFixed(saved < 10 ? 1 : 0);
+    roiEl('.js-roi-month').textContent = t('roi.sum', { v: fmtSum(Math.round(month)) });
+    roiEl('.js-roi-year').textContent = t('roi.sum', { v: fmtSum(Math.round(month * 12)) });
+    roiEl('.js-roi-pay').textContent =
+      month > 0 ? t('roi.payback', { d: Math.max(1, Math.ceil((30 * proPrice) / month)) }) : t('roi.paybackNone');
+  };
+  root.querySelectorAll<HTMLInputElement>('#roi input').forEach((inp) => inp.addEventListener('input', roi));
+  roi();
+
+  // Real usage totals — shown once there is something worth showing.
+  void getStats().then((s) => {
+    const el = root.querySelector<HTMLElement>('.js-live');
+    if (!el || !s || s.nests < 50) return;
+    el.innerHTML = t('l.live', {
+      parts: `<b>${fmtSum(s.parts)}</b>`,
+      nests: `<b>${fmtSum(s.nests)}</b>`,
+      users: `<b>${fmtSum(s.users)}</b>`,
+    });
+    el.hidden = false;
+  });
+
   // Live prices and the sales contact come from the admin's plan settings.
   void getConfig().then((cfg) => {
+    proPrice = cfg.plans.pro.price;
+    roi();
     const set = (sel: string, text: string): void => {
       root.querySelectorAll<HTMLElement>(sel).forEach((n) => {
         n.textContent = text;

@@ -244,6 +244,15 @@ export async function completeNest(meta: {
   return res;
 }
 
+/** Real usage totals for the landing page, or null when unavailable. */
+export async function getStats(): Promise<{ users: number; nests: number; parts: number } | null> {
+  try {
+    return await request<{ users: number; nests: number; parts: number }>('/api/stats');
+  } catch {
+    return null;
+  }
+}
+
 /** A file the browser cannot read (PDF, AI, EPS, CDR, DWG), converted on the server. */
 export interface ConvertedFile {
   kind: 'pdf' | 'ps' | 'cdr' | 'dwg';

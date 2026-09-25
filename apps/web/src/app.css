@@ -480,3 +480,36 @@ table.data tr:hover td { background: rgba(255, 255, 255, .028); }
 .credits-pill.trial { border-color: rgba(52, 211, 153, 0.5); }
 .credits-pill.trial b { background: none; -webkit-text-fill-color: #34d399; color: #34d399; }
 .plan-badge.trial { color: #34d399; border-color: rgba(52, 211, 153, .6); background: rgba(52, 211, 153, .1); }
+
+/* savings calculator */
+.roi { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; max-width: 980px; margin: 0 auto; }
+.roi-in, .roi-out {
+  border: 1px solid var(--line); border-radius: 18px; padding: 26px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+}
+.roi-in { display: grid; grid-template-columns: 1fr 1fr; gap: 20px 16px; align-content: start; }
+.roi-f { display: flex; flex-direction: column; gap: 9px; font-size: 13px; color: var(--muted); }
+.roi-f span { display: flex; justify-content: space-between; gap: 8px; }
+.roi-f b { color: var(--text); font-weight: 600; }
+.roi-f input[type='number'] {
+  background: var(--panel-2); border: 1px solid var(--line-2); color: var(--text); border-radius: 10px;
+  padding: 11px 12px; font-size: 16px; font-family: inherit; width: 100%;
+}
+.roi-f input[type='number']:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(108, 99, 255, .16); }
+.roi-f input[type='range'] { accent-color: var(--accent); width: 100%; margin: 6px 0 0; }
+.roi-out {
+  display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 14px 16px; align-content: start;
+  border-color: rgba(108, 99, 255, 0.42);
+  background: linear-gradient(180deg, rgba(108, 99, 255, 0.07), rgba(255, 255, 255, 0.012));
+}
+.roi-k { color: var(--muted); font-size: 13.5px; }
+.roi-v { font-size: 20px; font-weight: 700; text-align: right; letter-spacing: -0.02em; white-space: nowrap; }
+.roi-v.big { font-size: 26px; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.roi-pay { grid-column: 1 / -1; margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--good); font-weight: 600; font-size: 14.5px; }
+.live-stats { margin: 18px 0 0; color: var(--muted); font-size: 14px; }
+.live-stats b { color: var(--text); }
+@media (max-width: 760px) {
+  .roi { grid-template-columns: 1fr; }
+  .roi-in { grid-template-columns: 1fr; padding: 20px; }
+  .roi-out { padding: 20px; }
+}
