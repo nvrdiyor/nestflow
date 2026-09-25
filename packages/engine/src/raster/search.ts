@@ -20,6 +20,8 @@ export interface RasterSearchOptions {
   lane?: number;
   bandHeight?: number;
   onProgress?: (fraction: number, bestFitness: number) => void;
+  /** Called with every new best layout (live preview). */
+  onImprove?: (result: GreedyResult, fitness: number, iterations: number) => void;
   now?: () => number;
 }
 
@@ -176,6 +178,7 @@ export function runRasterSearch(instances: PartInstance[], opts: RasterSearchOpt
       top.best = cand;
       top.at = now();
       bestFit = cand.fitness;
+      opts.onImprove?.(cand.result, cand.fitness, iterations);
     }
     progress();
     return cand;

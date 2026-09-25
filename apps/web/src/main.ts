@@ -14,7 +14,9 @@ import {
   Layers,
   LayoutGrid,
   Maximize,
+  Move,
   Play,
+  RotateCw,
   Puzzle,
   Ruler,
   Scissors,
@@ -35,7 +37,7 @@ import { renderAdmin } from './views/admin';
 const root = document.getElementById('app') as HTMLElement;
 let cleanup: (() => void) | null = null;
 
-const LUCIDE = { ArrowRight, Check, ChevronDown, Download, FileUp, FlipHorizontal2, Layers, LayoutGrid, Maximize, Play, Puzzle, Ruler, Scissors, Settings2, Sparkles, Type, Upload, ZoomIn, ZoomOut };
+const LUCIDE = { ArrowRight, Check, ChevronDown, Download, FileUp, FlipHorizontal2, Layers, LayoutGrid, Maximize, Move, Play, Puzzle, RotateCw, Ruler, Scissors, Settings2, Sparkles, Type, Upload, ZoomIn, ZoomOut };
 AOS.init({ duration: 620, easing: 'ease-out-cubic', once: true, offset: 40 });
 
 /** Swap in Lucide icons and (re)collect AOS reveal targets after a view renders. */

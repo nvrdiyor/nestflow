@@ -68,6 +68,25 @@ export function nest(parts: Part[], config: NestConfig): NestResult {
 
   const strategy = config.strategy ?? 'balanced';
   let outcome: { result: ReturnType<typeof runSearch>['result']; iterations: number; fitness: number };
+  // Live preview: the best layout so far, as a full NestResult, a few times a second.
+  let lastPreview = 0;
+  const onImprove = config.onPreview
+    ? (result: ReturnType<typeof runSearch>['result'], fitness: number, iterations: number): void => {
+        const t = Date.now();
+        if (t - lastPreview < 400) return;
+        lastPreview = t;
+        config.onPreview?.({
+          placements: result.placements.map((p) => ({ ...p })),
+          unplaced: result.unplaced.slice(),
+          sheetsUsed: result.sheets.length,
+          metrics: computeMetrics(result, config),
+          iterations,
+          score: fitness,
+          elapsedMs: t - started,
+          config,
+        });
+      }
+    : undefined;
   if ((config.engine ?? 'raster') === 'raster') {
     outcome = runRasterSearch(instances, {
       usable,
@@ -81,6 +100,7 @@ export function nest(parts: Part[], config: NestConfig): NestResult {
       ...(config.lane !== undefined ? { lane: config.lane } : {}),
       ...(config.bandHeight !== undefined ? { bandHeight: config.bandHeight } : {}),
       ...(config.onProgress ? { onProgress: config.onProgress } : {}),
+      ...(onImprove ? { onImprove } : {}),
     });
   } else {
     outcome = runSearch(instances, greedyOpts, {

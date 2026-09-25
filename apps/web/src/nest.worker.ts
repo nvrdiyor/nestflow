@@ -98,6 +98,12 @@ self.onmessage = (event: MessageEvent<NestRequest>) => {
   const { parts, config } = event.data;
   try {
     let lastPct = -1;
+    // The engine echoes the config (incl. its callbacks) back on every result —
+    // functions can't cross the worker boundary, so strip them.
+    const clean = (r: NestResult): NestResult => {
+      const { onProgress: _p, onPreview: _v, ...cfg } = r.config as NestConfig;
+      return { ...r, config: cfg as NestConfig };
+    };
     const result = nest(parts, {
       ...config,
       onProgress: (fraction) => {
@@ -107,11 +113,12 @@ self.onmessage = (event: MessageEvent<NestRequest>) => {
           post({ progress: pct });
         }
       },
+      // Live preview: the best layout so far, drawn while the search runs.
+      onPreview: (r) => post({ preview: clean(r) }),
     });
-    // The engine echoes the config (incl. the onProgress function) back on the
-    // result — functions can't cross the worker boundary, so strip it.
-    const { onProgress: _drop, ...cleanConfig } = result.config as NestConfig & { onProgress?: unknown };
-    const overlaps = countOverlaps(result, parts, () => post({ progress: 99 }));
+    const cleanConfig = clean(result).config;
+    // Heartbeats keep the watchdog calm without faking progress for the other lanes.
+    const overlaps = countOverlaps(result, parts, () => post({ alive: true }));
     post({ result: { ...result, config: cleanConfig }, overlaps });
   } catch (err) {
     post({ error: err instanceof Error ? err.message : String(err) });

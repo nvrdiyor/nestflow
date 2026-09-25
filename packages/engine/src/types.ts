@@ -137,6 +137,11 @@ export interface NestConfig {
   machine?: MachineSpec;
   /** Progress callback invoked during search (0..1). */
   onProgress?: (fraction: number, best: number) => void;
+  /**
+   * Live preview: called with the best layout found so far each time the
+   * search improves it (throttled to a few times per second).
+   */
+  onPreview?: (result: NestResult) => void;
 }
 
 /** The placement of a single part instance on a sheet. */

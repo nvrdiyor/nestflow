@@ -14,6 +14,8 @@ import {
 import { importSvgParts } from '../svgImport';
 import { importDxfParts } from '../dxfImport';
 import { exportDxf } from '../exporters';
+import { openReport } from '../report';
+import { attachEditor, type Editor } from '../editor';
 import { appNavMarkup, pillMarkup } from '../ui/nav';
 import { openPlans } from '../ui/plans';
 import * as api from '../api';
@@ -121,6 +123,7 @@ const toolMarkup = (): string => `
       <h2>${t('app.export')}</h2>
       <div class="exports">
         <button id="exportDxf" class="secondary" disabled>${t('app.downloadDxf')}</button>
+        <button id="exportPdf" class="secondary" disabled>${t('app.downloadPdf')}</button>
       </div>
     </section>
   </aside>
@@ -138,6 +141,9 @@ const toolMarkup = (): string => `
         <span class="lvl js-zoom-lvl">100%</span>
         <button class="js-zoom-in" title="Zoom in" aria-label="Zoom in"><i data-lucide="zoom-in"></i></button>
         <button class="js-zoom-fit" title="Fit" aria-label="Fit to view"><i data-lucide="maximize"></i></button>
+        <span class="zc-sep"></span>
+        <button class="js-edit" title="${t('app.edit')}" aria-label="${t('app.edit')}" disabled><i data-lucide="move"></i></button>
+        <button class="js-rotate" title="${t('app.rotate90')}" aria-label="${t('app.rotate90')}" hidden><i data-lucide="rotate-cw"></i></button>
       </div>
     </div>
   </section>
@@ -183,6 +189,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const metricsEl = el('metrics');
   const importInfo = el('importInfo');
   const exportDxfBtn = el<HTMLButtonElement>('exportDxf');
+  const exportPdfBtn = el<HTMLButtonElement>('exportPdf');
+  const editBtn = root.querySelector<HTMLButtonElement>('.js-edit')!;
+  let editor: Editor;
 
   type MirrorMode = 'off' | 'auto' | 'all';
   const mirrorMode = (): MirrorMode => (el<HTMLSelectElement>('mirrorMode').value as MirrorMode) ?? 'off';
@@ -278,6 +287,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       : `<div class="empty-state"><div class="es-ic">⬆</div><p>${t('app.emptyState')}</p></div>`;
     zoom?.fit();
     exportDxfBtn.disabled = true;
+    exportPdfBtn.disabled = true;
+    editBtn.disabled = true;
     lastResult = null;
     statusEl.textContent = parts.length ? label : '';
     updateCostLabel();
@@ -373,7 +384,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   // Pure: draws the layout + metrics for `lastResult`/`lastParts`. Never charges,
   // so it is safe to call from the "Show cut path" toggle at any time.
-  const render = (r: NestResult): void => {
+  const render = (r: NestResult, keepView = false): void => {
     lastResult = r;
     lastPlans = planCutPath(r, lastParts);
     const cm = cutMetrics(lastPlans, currentConfig());
@@ -382,17 +393,79 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       ...(checked('showPath') ? { cutPlans: lastPlans } : {}),
       ...(partSvg ? { partSvg } : {}),
       sheetLabel: (n, util) => t('app.sheetLabel', { n, util }),
+      tagParts: true,
     });
-    zoom?.fit();
+    if (keepView) zoom?.keep();
+    else zoom?.fit();
     renderMetrics(r, cm);
     exportDxfBtn.disabled = false;
+    exportPdfBtn.disabled = false;
+    editBtn.disabled = false;
   };
 
   // Parallel search lanes: every lane runs the same job from different seed
   // layouts on its own CPU core and the lowest-score layout wins. One core is
   // left free for the UI.
   const LANES = Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1));
-  type WorkerMsg = { result?: NestResult; error?: string; progress?: number; overlaps?: number };
+  type WorkerMsg = {
+    result?: NestResult;
+    preview?: NestResult;
+    error?: string;
+    progress?: number;
+    overlaps?: number;
+    alive?: boolean;
+  };
+
+  // ---- live preview: the best layout so far, redrawn while the search runs ----
+  let previewScore = Number.POSITIVE_INFINITY;
+  let previewParts: Part[] = [];
+  let previewShown = false;
+  let previewPending: NestResult | null = null;
+  let previewTimer = 0;
+  let lastPreviewDraw = 0;
+  const drawPreview = (): void => {
+    previewTimer = 0;
+    const r = previewPending;
+    previewPending = null;
+    if (!r || !busy) return;
+    lastPreviewDraw = Date.now();
+    const out = fitEnabled() ? fitToParts(r, previewParts, toMm('margin')) : r;
+    const partSvg = makePartSvg(out);
+    el('svgHost').innerHTML = resultToSVG(out, previewParts, {
+      ...(partSvg ? { partSvg } : {}),
+      sheetLabel: (n, util) => t('app.sheetLabel', { n, util }),
+    });
+    if (!previewShown) {
+      previewShown = true;
+      zoom?.fit();
+      veil.classList.add('compact');
+    }
+    // Live cards: sheets and fill climb as the search improves.
+    const m = out.metrics;
+    renderMetrics(out, {
+      cutLength: m.totalCutLength,
+      commonLength: 0,
+      effectiveCutLength: m.totalCutLength,
+      travelLength: 0,
+      estimatedCutTimeSec: m.estimatedCutTimeSec,
+      savedLength: 0,
+      savedTimeSec: 0,
+    });
+  };
+  const onPreview = (r: NestResult): void => {
+    if (!busy || r.score >= previewScore) return;
+    previewScore = r.score;
+    previewPending = r;
+    if (previewTimer) return;
+    const wait = Math.max(0, 700 - (Date.now() - lastPreviewDraw));
+    previewTimer = window.setTimeout(drawPreview, wait);
+  };
+  const stopPreview = (): void => {
+    clearTimeout(previewTimer);
+    previewTimer = 0;
+    previewPending = null;
+    veil.classList.remove('compact');
+  };
   let lanes = { pending: 0, evals: 0, error: '', best: null as { result: NestResult; overlaps: number } | null };
 
   const run = (): void => {
@@ -422,6 +495,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     runCtx = { instances, strategy: STRATEGY, cost, parts };
     statusMsg(t('app.nesting', { n: instances, s: STRATEGY }));
     showVeil();
+    previewScore = Number.POSITIVE_INFINITY;
+    previewParts = parts;
+    previewShown = false;
     const config = currentConfig();
     lanes = { pending: workers.length, evals: 0, error: '', best: null };
     workers.forEach((w, i) =>
@@ -434,6 +510,15 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (e.data.progress !== undefined) {
       armWatchdog(); // the engine is alive — keep waiting
       setProgress(e.data.progress);
+      return;
+    }
+    if (e.data.alive) {
+      armWatchdog();
+      return;
+    }
+    if (e.data.preview) {
+      armWatchdog();
+      onPreview(e.data.preview);
       return;
     }
     if (!busy || lanes.pending <= 0) return;
@@ -459,6 +544,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   }
 
   async function finishRun(): Promise<void> {
+    stopPreview();
     const best = lanes.best;
     if (!best) {
       busy = false;
@@ -542,6 +628,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     watchdog = window.setTimeout(() => {
       workers.forEach((w) => w.terminate());
       spawnWorkers();
+      stopPreview();
       busy = false;
       runCtx = null;
       lanes.pending = 0;
@@ -711,6 +798,18 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   });
   runBtn.addEventListener('click', run);
   exportDxfBtn.addEventListener('click', () => lastResult && exportDxf(lastResult, lastParts, currentFine()));
+  exportPdfBtn.addEventListener('click', () => {
+    if (!lastResult) return;
+    const partSvg = makePartSvg(lastResult);
+    openReport({
+      result: lastResult,
+      parts: lastParts,
+      cut: cutMetrics(lastPlans, currentConfig()),
+      fileName: importedName,
+      sheetCost: num('sheetCost'),
+      ...(partSvg ? { partSvg } : {}),
+    });
+  });
   el('showPath').addEventListener('change', () => {
     if (lastResult) render(lastResult);
   });
@@ -733,6 +832,33 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     fit: vq('.js-zoom-fit'),
     level: vq('.js-zoom-lvl'),
   });
+
+  // ---- hand editing: drag a part, R / ↻ turns it by 90° ----
+  let editMode = false;
+  const rotateBtn = vq('.js-rotate') as HTMLButtonElement;
+  const setEditMode = (on: boolean): void => {
+    editMode = on;
+    editBtn.classList.toggle('active', on);
+    rotateBtn.hidden = !on;
+    viewport.classList.toggle('nf-edit', on);
+    if (!on) editor.select(null);
+    if (on) statusMsg(t('app.editHint'));
+  };
+  editor = attachEditor({
+    svgHost: el('svgHost'),
+    active: () => editMode && !busy && lastResult !== null,
+    result: () => lastResult,
+    parts: () => lastParts,
+    gap: () => toMm('spacing') + num('kerf'),
+    commit: (next, index) => {
+      render(next, true);
+      editor.select(index);
+      statusMsg(t('app.editSaved'));
+    },
+    reject: (verdict) => statusMsg(t(verdict === 'outside' ? 'app.editOutside' : 'app.editOverlap'), true),
+  });
+  editBtn.addEventListener('click', () => setEditMode(!editMode));
+  rotateBtn.addEventListener('click', () => editor.rotateSelected());
 
   // Restore work that survived a re-render (e.g. a language switch): the mirror
   // state must be restored BEFORE rendering so a mirrored result is redrawn with
@@ -776,7 +902,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   return () => {
     disarmWatchdog();
+    stopPreview();
     workers.forEach((w) => w.terminate());
+    editor.destroy();
     zoom?.destroy();
     clearInterval(veilTimer);
     savedWork = {

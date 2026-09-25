@@ -16,6 +16,8 @@ export interface ZoomPanUi {
 
 export interface ZoomPan {
   fit(): void;
+  /** After re-rendering the same drawing: keep the current zoom/pan window. */
+  keep(): void;
   destroy(): void;
 }
 
@@ -140,8 +142,20 @@ export function createZoomPan(viewport: HTMLElement, host: HTMLElement, ui: Zoom
   ui.out.addEventListener('click', () => centerZoom(1 / 1.25));
   ui.fit.addEventListener('click', fit);
 
+  const keep = (): void => {
+    const s = svgEl();
+    const prev = win;
+    const prevFull = full;
+    fit();
+    if (s && prev && prevFull && full && prevFull.w === full.w && prevFull.h === full.h) {
+      win = prev;
+      apply();
+    }
+  };
+
   return {
     fit,
+    keep,
     destroy() {
       viewport.removeEventListener('wheel', onWheel);
       viewport.removeEventListener('pointerdown', onDown);

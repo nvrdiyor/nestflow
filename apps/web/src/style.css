@@ -164,3 +164,23 @@
   .layout { grid-template-columns: 1fr; }
   .panel { border-right: 0; border-bottom: 1px solid var(--line); }
 }
+
+/* While a live preview is on screen the progress shrinks to a pill on top. */
+.progress-veil.compact {
+  inset: auto; top: 14px; left: 50%; transform: translateX(-50%);
+  flex-direction: row; gap: 12px; padding: 8px 18px; border-radius: 999px;
+  background: rgba(7, 10, 16, 0.85); border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(8px);
+}
+.progress-veil.compact .pv-num { font-size: 20px; }
+.progress-veil.compact .pv-num small { font-size: 12px; }
+.progress-veil.compact .pv-bar { width: 150px; }
+.progress-veil.compact .pv-label { font-size: 12px; }
+
+/* ---------- hand editing ---------- */
+.zoom-ctl .zc-sep { width: 1px; align-self: stretch; margin: 4px 2px; background: rgba(255, 255, 255, 0.12); }
+.zoom-ctl button.active { background: var(--grad-btn, #6366f1); color: #fff; }
+.zoom-ctl button[disabled] { opacity: .35; cursor: default; }
+.viewport.nf-edit .nf-part { cursor: grab; }
+.viewport.nf-edit .nf-part:hover { filter: brightness(1.25); }
+.nf-part.nf-drag { cursor: grabbing; opacity: .85; }
+.nf-part.nf-sel { filter: drop-shadow(0 0 3px #fbbf24) drop-shadow(0 0 1px #fbbf24); }

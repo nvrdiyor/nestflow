@@ -40,6 +40,14 @@ export interface RenderOptions {
    * Return null to fall back to the flattened contour.
    */
   partSvg?: (partId: string, placement: Placement) => string | null;
+  /**
+   * Wrap every part in `<g class="nf-part" data-pl="<index>" data-sheet data-ox data-oy>`
+   * (index into result.placements; ox/oy = the sheet's origin in SVG units) so
+   * an editor can pick and move parts.
+   */
+  tagParts?: boolean;
+  /** 'light' draws white sheets with dark lines/text — for printed reports. */
+  palette?: 'dark' | 'light';
 }
 
 const PALETTE = [
@@ -105,6 +113,10 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
   const dimH = dimensions ? Math.max(sheetW, sheetH) * 0.055 : 0;
 
   const partMap = new Map(parts.map((p) => [p.id, p]));
+  const light = options.palette === 'light';
+  const C = light
+    ? { plate: '#ffffff', plateLine: '#111827', margin: '#9ca3af', caption: '#111827', dim: '#6b7280', dimText: '#374151' }
+    : { plate: '#111827', plateLine: '#334155', margin: '#1f2937', caption: '#e5e7eb', dim: '#475569', dimText: '#94a3b8' };
 
   const totalW = padding * 2 + sheetsUsed * sheetW + (sheetsUsed - 1) * gap;
   const totalH = padding * 2 + sheetH + labelH + dimH;
@@ -119,11 +131,13 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
   );
   if (background) svg.push(`<rect x="0" y="0" width="${totalW}" height="${totalH}" fill="#0b0e14"/>`);
 
-  // Group placements by sheet.
+  // Group placements by sheet (keeping each one's index for tagging).
   const bySheet: Placement[][] = Array.from({ length: sheetsUsed }, () => []);
-  for (const p of result.placements) {
+  const indexOf = new Map<Placement, number>();
+  result.placements.forEach((p, i) => {
+    indexOf.set(p, i);
     if (p.sheet >= 0 && p.sheet < sheetsUsed) (bySheet[p.sheet] as Placement[]).push(p);
-  }
+  });
 
   // Per-sheet utilization: this sheet's part area over its plate area (the
   // global metric repeated on every sheet misreads as identical fill levels).
@@ -142,30 +156,34 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
     if (sheetOutline) {
       // Sheet plate.
       svg.push(
-        `<rect x="${ox.toFixed(2)}" y="${oy.toFixed(2)}" width="${sheetW}" height="${sheetH}" fill="#111827" stroke="#334155" stroke-width="${stroke}"/>`,
+        `<rect x="${ox.toFixed(2)}" y="${oy.toFixed(2)}" width="${sheetW}" height="${sheetH}" fill="${C.plate}" stroke="${C.plateLine}" stroke-width="${stroke}"/>`,
       );
       if (margin > 0) {
         svg.push(
           `<rect x="${(ox + margin).toFixed(2)}" y="${(oy + margin).toFixed(2)}" width="${(
             sheetW -
             2 * margin
-          ).toFixed(2)}" height="${(sheetH - 2 * margin).toFixed(2)}" fill="none" stroke="#1f2937" stroke-width="${stroke}" stroke-dasharray="${(stroke * 4).toFixed(2)}"/>`,
+          ).toFixed(2)}" height="${(sheetH - 2 * margin).toFixed(2)}" fill="none" stroke="${C.margin}" stroke-width="${stroke}" stroke-dasharray="${(stroke * 4).toFixed(2)}"/>`,
         );
       }
     }
     for (const placement of bySheet[s] as Placement[]) {
       const part = partMap.get(placement.partId);
       if (!part) continue;
+      const open = options.tagParts
+        ? `<g class="nf-part" data-pl="${indexOf.get(placement)}" data-sheet="${s}" data-ox="${ox.toFixed(3)}" data-oy="${oy.toFixed(3)}">`
+        : '';
+      const close = options.tagParts ? '</g>' : '';
       const override = options.partSvg?.(placement.partId, placement) ?? null;
       if (override !== null) {
         // Caller-supplied original geometry, in world coords; offset to the sheet.
-        svg.push(`<g transform="translate(${ox.toFixed(3)} ${oy.toFixed(3)})">${override}</g>`);
+        svg.push(`${open}<g transform="translate(${ox.toFixed(3)} ${oy.toFixed(3)})">${override}</g>${close}`);
         continue;
       }
       const contour = placementContour(part, placement);
       const color = colorFor(placement.partId);
       svg.push(
-        `<path d="${contourPath(contour, ox, oy)}" fill="${color}" fill-rule="evenodd"/>`,
+        `${open}<path d="${contourPath(contour, ox, oy)}" fill="${color}" fill-rule="evenodd"/>${close}`,
       );
     }
 
@@ -200,7 +218,7 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
       svg.push(
         `<text x="${ox.toFixed(2)}" y="${(oy - labelH * 0.3).toFixed(
           2,
-        )}" fill="#e5e7eb" font-size="${(labelH * 0.6).toFixed(2)}">${escapeXml(caption)}</text>`,
+        )}" fill="${C.caption}" font-size="${(labelH * 0.6).toFixed(2)}">${escapeXml(caption)}</text>`,
       );
     }
 
@@ -212,18 +230,18 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
       const yLine = oy + sheetH + fs * 0.9;
       const tick = fs * 0.35;
       svg.push(
-        `<g stroke="#475569" stroke-width="${dimStroke}">` +
+        `<g stroke="${C.dim}" stroke-width="${dimStroke}">` +
           `<line x1="${ox.toFixed(2)}" y1="${yLine.toFixed(2)}" x2="${(ox + sheetW).toFixed(2)}" y2="${yLine.toFixed(2)}"/>` +
           `<line x1="${ox.toFixed(2)}" y1="${(yLine - tick).toFixed(2)}" x2="${ox.toFixed(2)}" y2="${(yLine + tick).toFixed(2)}"/>` +
           `<line x1="${(ox + sheetW).toFixed(2)}" y1="${(yLine - tick).toFixed(2)}" x2="${(ox + sheetW).toFixed(2)}" y2="${(yLine + tick).toFixed(2)}"/>` +
           `</g>`,
       );
       svg.push(
-        `<text x="${(ox + sheetW / 2).toFixed(2)}" y="${(yLine + fs * 1.15).toFixed(2)}" text-anchor="middle" fill="#94a3b8" font-size="${fs.toFixed(2)}">${fmt(sheetW)} mm</text>`,
+        `<text x="${(ox + sheetW / 2).toFixed(2)}" y="${(yLine + fs * 1.15).toFixed(2)}" text-anchor="middle" fill="${C.dimText}" font-size="${fs.toFixed(2)}">${fmt(sheetW)} mm</text>`,
       );
       const xLine = ox + sheetW + fs * 0.9;
       svg.push(
-        `<g stroke="#475569" stroke-width="${dimStroke}">` +
+        `<g stroke="${C.dim}" stroke-width="${dimStroke}">` +
           `<line x1="${xLine.toFixed(2)}" y1="${oy.toFixed(2)}" x2="${xLine.toFixed(2)}" y2="${(oy + sheetH).toFixed(2)}"/>` +
           `<line x1="${(xLine - tick).toFixed(2)}" y1="${oy.toFixed(2)}" x2="${(xLine + tick).toFixed(2)}" y2="${oy.toFixed(2)}"/>` +
           `<line x1="${(xLine - tick).toFixed(2)}" y1="${(oy + sheetH).toFixed(2)}" x2="${(xLine + tick).toFixed(2)}" y2="${(oy + sheetH).toFixed(2)}"/>` +
@@ -232,7 +250,7 @@ export function resultToSVG(result: NestResult, parts: Part[], options: RenderOp
       const tx = xLine + fs * 1.05;
       const ty = oy + sheetH / 2;
       svg.push(
-        `<text x="${tx.toFixed(2)}" y="${ty.toFixed(2)}" text-anchor="middle" fill="#94a3b8" font-size="${fs.toFixed(2)}" transform="rotate(90 ${tx.toFixed(2)} ${ty.toFixed(2)})">${fmt(sheetH)} mm</text>`,
+        `<text x="${tx.toFixed(2)}" y="${ty.toFixed(2)}" text-anchor="middle" fill="${C.dimText}" font-size="${fs.toFixed(2)}" transform="rotate(90 ${tx.toFixed(2)} ${ty.toFixed(2)})">${fmt(sheetH)} mm</text>`,
       );
     }
   }
