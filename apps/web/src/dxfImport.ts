@@ -272,7 +272,14 @@ function chainLoops(segments: Point[][], tol: number): { rings: Ring[]; openChai
   return { rings, openChains };
 }
 
-export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
+export interface DxfImportOptions {
+  /** Layers whose geometry is not cut (annotations, dimensions, engraving…). */
+  ignoreLayers?: Iterable<string>;
+}
+
+export function importDxfParts(text: string, mmPerUnit = 1, options: DxfImportOptions = {}): ImportResult {
+  const ignore = new Set(options.ignoreLayers ?? []);
+  const layerCount = new Map<string, number>();
   const allPairs = tokenize(text);
   const groups = entityGroups(allPairs);
   if (groups.length === 0) return { parts: [], warnings: ['No DXF ENTITIES section found.'] };
@@ -291,19 +298,41 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
   let xf: Xf = XF_ID;
   const tx = (pts: Point[]): Point[] =>
     xf === XF_ID ? pts : pts.map((p) => ({ x: xf[0] * p.x + xf[2] * p.y + xf[4], y: xf[1] * p.x + xf[3] * p.y + xf[5] }));
+  // Source layer by point object: ring starts and segment ends keep their
+  // identity through chaining, so every final loop can name its layer.
+  const pointLayer = new Map<Point, string>();
+  let curLayer = '0';
   const addClosed = (pts: Point[]): void => {
-    closedRings.push(tx(pts) as Ring);
+    const r = tx(pts);
+    if (r[0]) pointLayer.set(r[0], curLayer);
+    closedRings.push(r as Ring);
   };
   const addOpen = (pts: Point[]): void => {
-    openSegments.push(tx(pts));
+    const r = tx(pts);
+    if (r.length) {
+      pointLayer.set(r[0]!, curLayer);
+      pointLayer.set(r[r.length - 1]!, curLayer);
+    }
+    openSegments.push(r);
   };
 
-  const collect = (groups: EntityGroup[], depth: number): void => {
+  const collect = (groups: EntityGroup[], depth: number, parentLayer = ''): void => {
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi]!;
     // Our own exports put the sheet boundary on a `frame` layer — never a part.
-    const layer = g.pairs.find((pr) => pr.code === 8)?.value ?? '';
+    let layer = g.pairs.find((pr) => pr.code === 8)?.value ?? '';
+    // Entities on layer 0 inside a block take the layer of the INSERT placing them.
+    if ((layer === '0' || layer === '') && parentLayer) layer = parentLayer;
     if (layer.toLowerCase() === 'frame') continue;
+    if (g.type !== 'VERTEX' && g.type !== 'SEQEND' && g.type !== 'ATTRIB' && g.type !== 'ATTDEF') {
+      layerCount.set(layer || '0', (layerCount.get(layer || '0') ?? 0) + 1);
+    }
+    curLayer = layer || '0';
+    if (ignore.has(layer || '0')) {
+      // Skip the entity (and a POLYLINE's trailing VERTEX list).
+      if (g.type === 'POLYLINE') while (gi + 1 < groups.length && (groups[gi + 1]!.type === 'VERTEX' || groups[gi + 1]!.type === 'SEQEND')) gi++;
+      continue;
+    }
     switch (g.type) {
       case 'LINE': {
         const x1 = first(g.pairs, 10);
@@ -444,7 +473,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
             const place: Xf = [cos, sin, -sin, cos, ix, iy];
             const local: Xf = [sx, 0, 0, sy, c * dc - sx * def.base.x, r * dr - sy * def.base.y];
             xf = xfMul(parent, xfMul(place, local));
-            collect(def.groups, depth + 1);
+            collect(def.groups, depth + 1, layer);
           }
         }
         xf = parent;
@@ -519,11 +548,21 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
   if (openCount > 0) warnings.push(`${openCount} open outline(s) could not be closed.`);
   void splines;
 
-  const result = contoursToParts(ringsToContours(rings), scale, undefined, 0, true);
+  const layerOf = (c: { outer: Ring }): string | undefined => {
+    const direct = pointLayer.get(c.outer[0]!);
+    if (direct) return direct;
+    for (const p of c.outer) {
+      const l = pointLayer.get(p);
+      if (l) return l;
+    }
+    return undefined;
+  };
+  const result = contoursToParts(ringsToContours(rings), scale, undefined, 0, true, layerOf);
   const size = overallSize(result.parts);
   if (size) result.size = size;
   result.parts = dedupeRepeatedParts(result.parts, result.sources, result.fineContours);
   result.warnings.unshift(...warnings);
+  result.layers = [...layerCount].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
   if (result.parts.length === 0 && warnings.length === 0) {
     result.warnings.push('No closed loops found in the DXF.');
   }

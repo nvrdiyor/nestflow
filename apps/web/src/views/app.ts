@@ -1,4 +1,5 @@
 import {
+  contourArea,
   cutMetrics,
   planCutPath,
   remnantFreeFraction,
@@ -13,13 +14,13 @@ import {
   type Part,
   type Strategy,
 } from '@nestflow/engine';
-import { importSvgParts } from '../svgImport';
-import { importDxfParts } from '../dxfImport';
 import { lbrnToSvg } from '../lbrnImport';
 import { exportDxf } from '../exporters';
 import { openReport } from '../report';
 import { attachEditor, type Editor } from '../editor';
 import * as store from '../store';
+import * as job from '../job';
+import { createPartsPanel } from '../partsPanel';
 import { appNavMarkup, pillMarkup } from '../ui/nav';
 import { openPlans } from '../ui/plans';
 import * as api from '../api';
@@ -40,15 +41,9 @@ type Nav = (hash: string) => void;
  * would silently vanish. Written on cleanup, restored on the next mount.
  */
 interface SavedWork {
-  importedParts: Part[];
-  importedText: string | null;
-  importedName: string;
-  importInfo: string;
-  sources: Map<string, VectorSource>;
-  fineContours: Map<string, Contour>;
-  importScale: number;
-  baseW: number;
-  baseH: number;
+  files: job.LoadedFile[];
+  activeFile: number;
+  overrides: Array<[string, job.PartOverride]>;
   lastParts: Part[];
   lastResult: NestResult | null;
   lastPlans: CutPlan[];
@@ -68,8 +63,7 @@ const SERVER_FORMATS = new Set(['pdf', 'ai', 'eps', 'ps', 'cdr', 'dwg']);
 const MAX_UPLOAD = 60 * 1024 * 1024;
 const extOf = (name: string): string => (/\.([a-z0-9]+)$/i.exec(name)?.[1] ?? '').toLowerCase();
 
-/** All rotations are always allowed; the engine always searches at max effort. */
-const ROTATIONS = [0, 90, 180, 270];
+/** The engine always searches at max effort; the time budget is the user's lever. */
 const STRATEGY: Strategy = 'max';
 
 const toolMarkup = (): string => `
@@ -78,7 +72,8 @@ const toolMarkup = (): string => `
     <section class="group">
       <h2>${t('app.yourParts')}</h2>
       <div id="drop" class="drop">
-        <input id="file" type="file" accept="${ACCEPT}" hidden />
+        <input id="file" type="file" accept="${ACCEPT}" multiple hidden />
+        <input id="fileAdd" type="file" accept="${ACCEPT}" multiple hidden />
         <i data-lucide="upload" class="drop-ic"></i>
         <span>${t('app.dropHere')} <button type="button" id="browse" class="link">${t('app.browse')}</button></span>
       </div>
@@ -88,6 +83,7 @@ const toolMarkup = (): string => `
       </div>
       <p class="hint">${t('app.sizeHint')}</p>
       <p id="importInfo" class="hint">${t('app.uploadHint')}</p>
+      <div id="jobPanel" class="job-panel" hidden></div>
     </section>
     <section class="group">
       <h2>${t('app.sheet')} <b class="js-unit" style="text-transform:none">mm</b></h2>
@@ -114,6 +110,16 @@ const toolMarkup = (): string => `
         <label class="field"><span>${t('app.margin')} <b class="js-unit">mm</b></span><input id="margin" type="number" value="5" min="0" step="1" /></label>
         <label class="field"><span>${t('app.sheetCost')}</span><input id="sheetCost" type="number" value="45" min="0" step="1" /></label>
       </div>
+      <div class="row">
+        <label class="field"><span>${t('app.maxSheets')}</span><input id="maxSheets" type="number" min="1" step="1" placeholder="∞" /></label>
+        <label class="field"><span>${t('app.quality')}</span>
+          <select id="quality">
+            <option value="fast">${t('q.fast')}</option>
+            <option value="auto" selected>${t('q.auto')}</option>
+            <option value="max">${t('q.max')}</option>
+          </select>
+        </label>
+      </div>
       <label class="check" style="margin-top:10px"><input id="fitSheet" type="checkbox" /> <span>${t('app.fitSheet')}</span></label>
       <div class="rem-row">
         <label class="field"><span>${t('rem.label')}</span>
@@ -130,7 +136,15 @@ const toolMarkup = (): string => `
         <label class="field"><span>${t('app.kerf')} <b>mm</b></span><input id="kerf" type="number" value="0.2" min="0" step="0.1" /></label>
       </div>
       <label class="check"><input id="holeFilling" type="checkbox" /> <span>${t('app.fillHoles')}</span></label>
-      <label class="check" style="margin-top:10px"><input id="allowRot" type="checkbox" checked /> <span>${t('app.allowRot')}</span></label>
+      <label class="field" style="margin-top:10px"><span>${t('app.rotation')}</span>
+        <select id="rotStep">
+          <option value="0">${t('rot.0')}</option>
+          <option value="180">0° / 180°</option>
+          <option value="90" selected>${t('rot.90')}</option>
+          <option value="45">${t('rot.45')}</option>
+          <option value="15">${t('rot.15')}</option>
+        </select>
+      </label>
       <label class="field" style="margin-top:10px"><span>${t('app.mirror')}</span>
         <select id="mirrorMode">
           <option value="off" selected>${t('app.mirrorOff')}</option>
@@ -148,6 +162,14 @@ const toolMarkup = (): string => `
         <button id="exportDxf" class="secondary" disabled>${t('app.downloadDxf')}</button>
         <button id="exportPdf" class="secondary" disabled>${t('app.downloadPdf')}</button>
       </div>
+      <label class="field" style="margin-top:10px"><span>${t('exp.layers')}</span>
+        <select id="dxfLayers">
+          <option value="split">${t('exp.layersSplit')}</option>
+          <option value="source">${t('exp.layersSource')}</option>
+          <option value="single">${t('exp.layersSingle')}</option>
+        </select>
+      </label>
+      <label class="check" style="margin-top:8px"><input id="dxfBlocks" type="checkbox" /> <span>${t('exp.blocks')}</span></label>
       <button id="saveRemnant" class="secondary rem-save" disabled>${t('rem.save')}</button>
     </section>
     <details class="group hist" id="histBox">
@@ -171,7 +193,14 @@ const toolMarkup = (): string => `
         <button class="js-zoom-fit" title="Fit" aria-label="Fit to view"><i data-lucide="maximize"></i></button>
         <span class="zc-sep"></span>
         <button class="js-edit" title="${t('app.edit')}" aria-label="${t('app.edit')}" disabled><i data-lucide="move"></i></button>
-        <button class="js-rotate" title="${t('app.rotate90')}" aria-label="${t('app.rotate90')}" hidden><i data-lucide="rotate-cw"></i></button>
+      </div>
+      <div class="edit-bar" id="editBar" hidden>
+        <span class="eb-sel" id="ebSel"></span>
+        <button type="button" data-rot="-90" title="${t('edit.rotL')}">↺ 90°</button>
+        <button type="button" data-rot="90" title="${t('edit.rotR')}">↻ 90°</button>
+        <span class="eb-ang"><input id="ebAngle" type="number" value="15" step="1" min="-359" max="359" aria-label="${t('edit.angle')}" />°<button type="button" id="ebRotate" title="${t('edit.rotBy')}">↻</button></span>
+        <button type="button" id="ebDelete" title="${t('edit.delete')}">${t('edit.deleteShort')}</button>
+        <button type="button" id="ebUndo" title="${t('edit.undo')}" disabled>↶ ${t('edit.undoShort')}</button>
       </div>
     </div>
   </section>
@@ -190,17 +219,29 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const num = (id: string): number => Number(el<HTMLInputElement>(id).value) || 0;
   const checked = (id: string): boolean => el<HTMLInputElement>(id).checked;
 
-  let importedParts: Part[] = savedWork?.importedParts ?? [];
-  let importedText: string | null = savedWork?.importedText ?? null;
-  let importedName = savedWork?.importedName ?? '';
+  // The job: its drawings, the one the real-size fields resize, per-part choices.
+  let files: job.LoadedFile[] = savedWork?.files ?? [];
+  let activeFile = savedWork?.activeFile ?? 0;
+  const overrides = new Map<string, job.PartOverride>(savedWork?.overrides ?? []);
+  // Derived from the job (rebuildJobData): what is nested, drawn and exported.
+  let importedParts: Part[] = [];
+  let importedName = '';
+  let sources = new Map<string, VectorSource>();
+  let fineContours = new Map<string, Contour>();
+  let partLayers = new Map<string, string>();
+  function rebuildJobData(): void {
+    importedParts = job.jobParts(files, overrides);
+    sources = job.mergedSources(files);
+    fineContours = job.mergedFine(files);
+    partLayers = job.mergedLayers(files);
+    importedName = files.map((x) => x.name).join(' + ');
+  }
+  rebuildJobData();
   let lastParts: Part[] = savedWork?.lastParts ?? [];
   let lastResult: NestResult | null = savedWork?.lastResult ?? null;
   let lastPlans: CutPlan[] = savedWork?.lastPlans ?? [];
-  let sources = savedWork?.sources ?? new Map<string, VectorSource>();
-  let fineContours = savedWork?.fineContours ?? new Map<string, Contour>();
-  let importScale = savedWork?.importScale ?? 1; // mm per file unit, set via real-size fields
-  let baseW = savedWork?.baseW ?? 0; // imported bbox at scale 1, mm
-  let baseH = savedWork?.baseH ?? 0;
+  // Hand edits of the result on screen, newest last (Ctrl+Z).
+  const undoStack: NestResult[] = [];
   let zoom: ZoomPan | null = null;
   let busy = false;
   let watchdog = 0;
@@ -287,11 +328,12 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       : fitEnabled()
         ? { ...estimateSheet(currentParts()), margin: toMm('margin'), cost: num('sheetCost') }
         : { width: toMm('sheetW'), height: toMm('sheetH'), margin: toMm('margin'), cost: num('sheetCost') };
+    const maxSheets = Math.round(num('maxSheets'));
     return {
-      sheet,
+      sheet: maxSheets > 0 && !fitEnabled() ? { ...sheet, quantity: maxSheets } : sheet,
       ...(rem ? { remnants: [{ blocked: rem.blocked, label: rem.name }] } : {}),
       units: 'mm',
-      rotations: checked('allowRot') ? ROTATIONS : [0],
+      rotations: job.rotationsFor(el<HTMLSelectElement>('rotStep').value),
       allowMirror: mirrorMode() === 'auto', // per-part, only where it helps
       // Parts are nested on their true contours, so the asked gap is exact.
       spacing: toMm('spacing'),
@@ -401,6 +443,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     saveRemnantBtn.disabled = true;
     lastResult = null;
     runId = null;
+    undoStack.length = 0;
     statusEl.textContent = parts.length ? label : '';
     updateCostLabel();
   };
@@ -413,8 +456,11 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // seconds just warming the NFP cache, and an 8s cap left "1 layouts" tried.
   // The user prioritises pack quality over wall-clock: big jobs get up to 90s
   // of search (progress stays live via per-part heartbeats, so waiting is safe).
-  const searchBudgetMs = (): number =>
-    Math.min(90_000, 8000 + Math.max(0, instanceCount(currentParts()) - 8) * 900);
+  const searchBudgetMs = (): number => {
+    const auto = Math.min(90_000, 8000 + Math.max(0, instanceCount(currentParts()) - 8) * 900);
+    const q = el<HTMLSelectElement>('quality').value;
+    return q === 'fast' ? Math.min(auto, 12_000) : q === 'max' ? Math.min(240_000, Math.round(auto * 2.5)) : auto;
+  };
   let SEARCH_MS = 8000;
   const veil = el('progressVeil');
   const veilPct = el('progressPct');
@@ -724,6 +770,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     // Crop the sheet to the packed parts for a clean, full layout (auto-size).
     resultFit = fitEnabled();
     const out = resultFit ? fitToParts(r, lastParts, toMm('margin')) : r;
+    undoStack.length = 0;
     render(out);
     hideVeil(true);
     runId = store.newId();
@@ -797,65 +844,144 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (ext === 'lbrn' || ext === 'lbrn2') return 'LightBurn';
     return isDxf(text, name) ? 'DXF' : 'SVG';
   };
-  let importNote = '';
-  const loadFile = (text: string, name: string): void => {
-    importedText = text;
-    importedName = name;
-    const result = isDxf(text, name) ? importDxfParts(text, importScale) : importSvgParts(text, importScale);
-    const { parts, warnings } = result;
-    if (!parts.length) {
-      importInfo.textContent = warnings[0] ? localizeWarning(warnings[0]) : 'No shapes found.';
-      importInfo.classList.add('warn');
-      return;
+  // Real-size fields, info line and parts panel follow the job (no preview reset).
+  const syncJobUi = (): void => {
+    rebuildJobData();
+    activeFile = Math.min(activeFile, Math.max(0, files.length - 1));
+    const f = files[activeFile];
+    const wEl = el<HTMLInputElement>('realW');
+    const hEl = el<HTMLInputElement>('realH');
+    const sized = !!f && f.w > 0;
+    wEl.disabled = !sized;
+    hEl.disabled = !sized;
+    if (sized) {
+      setLen('realW', f.w);
+      setLen('realH', f.h);
+    } else {
+      wEl.value = '';
+      hEl.value = '';
     }
-    importedParts = parts;
-    sources = result.sources ?? new Map(); // exact geometry (SVG elements / DXF fine paths)
-    fineContours = result.fineContours ?? new Map();
-    importInfo.classList.toggle('warn', warnings.length > 0);
-    // Overall size of the DRAWING (as laid out in the file), so a wrong-unit
-    // file is obvious at a glance and "real size" rescales the whole drawing.
-    let impW = result.size?.w ?? 0;
-    let impH = result.size?.h ?? 0;
-    if (!(impW > 0)) {
-      for (const p of parts) {
-        const b = ringBounds(p.contour.outer);
-        impW = Math.max(impW, b.maxX - b.minX);
-        impH = Math.max(impH, b.maxY - b.minY);
-      }
+    if (!f) {
+      importInfo.textContent = t('app.uploadHint');
+      importInfo.classList.remove('warn');
+    } else {
+      const warn = files.flatMap((x) => x.warnings);
+      const n = instanceCount(importedParts);
+      importInfo.classList.toggle('warn', warn.length > 0);
+      importInfo.textContent =
+        (files.length === 1
+          ? t('app.importedShapes', { n, fmt: fmtLabel(f.text, f.name) }) + (sized ? ` · ${Math.round(f.w)}×${Math.round(f.h)} mm` : '')
+          : t('parts.jobInfo', { files: files.length, n })) +
+        (f.note ? ' · ' + f.note : '') +
+        (warn.length ? ' · ' + localizeWarning(warn[0]!) : '');
     }
-    if (impW > 0) {
-      baseW = impW / importScale;
-      baseH = impH / importScale;
-      const wEl = el<HTMLInputElement>('realW');
-      const hEl = el<HTMLInputElement>('realH');
-      wEl.disabled = false;
-      hEl.disabled = false;
-      setLen('realW', impW);
-      setLen('realH', impH);
-    }
-    const sizeStr = impW > 0 ? ` · ${Math.round(impW)}×${Math.round(impH)} mm` : '';
-    importInfo.textContent =
-      t('app.importedShapes', { n: instanceCount(parts), fmt: fmtLabel(text, name) }) +
-      sizeStr +
-      (importNote ? ' · ' + importNote : '') +
-      (warnings.length ? ' · ' + localizeWarning(warnings[0]!) : '');
+    panel.update({ files, overrides, active: activeFile });
     updateCostLabel();
-    showPreview(t('app.partsReady'));
+    markRemnantFit();
+  };
+  const refreshJob = (label = t('app.partsReady')): void => {
+    syncJobUi();
+    showPreview(files.length ? label : '');
   };
 
-  // A NEW file always starts at its true size: a real-size correction typed
-  // for the previous file must never silently rescale the next one (that bug
-  // made a 12.5 cm part come out 12.2 cm).
-  const openFile = (text: string, name: string, note = ''): void => {
-    importScale = 1;
-    importNote = note;
-    loadFile(text, name);
+  // A NEW file always starts at its true size (scale 1): a real-size
+  // correction typed for the previous file must never silently rescale the
+  // next one (that bug made a 12.5 cm part come out 12.2 cm). `add` keeps the
+  // drawings already in the job; otherwise the job starts over.
+  const openFile = (text: string, name: string, note = '', add = false): boolean => {
+    const meta = job.nextFileMeta(add ? files : []);
+    const loaded = job.loadJobFile({ ...meta, name, text, scale: 1, note, layersOff: [] });
+    if (!loaded.parts.length && !loaded.layers.length) {
+      importInfo.textContent = loaded.warnings[0] ? localizeWarning(loaded.warnings[0]) : t('parts.noShapes');
+      importInfo.classList.add('warn');
+      return false;
+    }
+    if (add) {
+      files = [...files, loaded];
+      activeFile = files.length - 1;
+    } else {
+      files = [loaded];
+      activeFile = 0;
+      overrides.clear();
+    }
+    refreshJob();
+    return loaded.parts.length > 0;
   };
+
+  const reloadFile = (i: number, change: Partial<job.JobFile>): void => {
+    files = files.map((x, j) => (j === i ? job.loadJobFile({ ...job.jobData(x), ...change }) : x));
+  };
+
+  const panel = createPartsPanel(el('jobPanel'), {
+    quantity: (id, qty) => {
+      overrides.set(id, { ...overrides.get(id), qty });
+      refreshJob(readyLabel());
+    },
+    rotation: (id, step) => {
+      const o: job.PartOverride = { ...overrides.get(id) };
+      if (step) o.rot = step;
+      else delete o.rot;
+      overrides.set(id, o);
+      refreshJob(readyLabel());
+    },
+    multiply: (k) => {
+      for (const x of files) {
+        for (const p of x.parts) {
+          const cur = overrides.get(p.id)?.qty ?? p.quantity ?? 1;
+          overrides.set(p.id, { ...overrides.get(p.id), qty: Math.min(100000, cur * k) });
+        }
+      }
+      refreshJob(readyLabel());
+    },
+    resetQuantities: () => {
+      for (const [id, o] of overrides) {
+        const next: job.PartOverride = { ...o };
+        delete next.qty;
+        overrides.set(id, next);
+      }
+      refreshJob(readyLabel());
+    },
+    activateFile: (i) => {
+      activeFile = i;
+      syncJobUi();
+    },
+    removeFile: (i) => {
+      for (const p of files[i]?.parts ?? []) overrides.delete(p.id);
+      files = files.filter((_, j) => j !== i);
+      refreshJob(readyLabel());
+    },
+    addFile: () => el<HTMLInputElement>('fileAdd').click(),
+    clear: () => {
+      files = [];
+      overrides.clear();
+      refreshJob();
+    },
+    layer: (i, layer, cut) => {
+      const x = files[i];
+      if (!x) return;
+      const off = new Set(x.layersOff);
+      if (cut) off.delete(layer);
+      else off.add(layer);
+      // Part numbering changes with the layers — per-part choices start over.
+      for (const p of x.parts) overrides.delete(p.id);
+      reloadFile(i, { layersOff: [...off] });
+      refreshJob(readyLabel());
+    },
+    highlight: (id) => {
+      const host = el('svgHost');
+      host.querySelectorAll('.pt-hl').forEach((n) => n.classList.remove('pt-hl'));
+      if (!id) return;
+      host.querySelectorAll(`[data-part="${CSS.escape(id)}"]`).forEach((n) => n.classList.add('pt-hl'));
+      lastResult?.placements.forEach((p, i) => {
+        if (p.partId === id) host.querySelector(`.nf-part[data-pl="${i}"]`)?.classList.add('pt-hl');
+      });
+    },
+  });
 
   // Any supported file: SVG / DXF read as text, LightBurn converted here,
   // PDF / AI / EPS / CDR / DWG converted on the server.
   let converting = false;
-  const openUpload = async (file: File): Promise<void> => {
+  const openUpload = async (file: File, add = false): Promise<void> => {
     const ext = extOf(file.name);
     const fmt = SERVER_FORMATS.has(ext) ? ext.toUpperCase() : ext === 'lbrn' || ext === 'lbrn2' ? 'LightBurn' : ext.toUpperCase();
     const fail = (msg: string): void => {
@@ -870,14 +996,14 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (ext === 'lbrn' || ext === 'lbrn2') {
       try {
         const res = lbrnToSvg(await file.text());
-        openFile(res.svg, file.name, res.skippedText ? t('conv.lbrnText', { n: res.skippedText }) : '');
+        openFile(res.svg, file.name, res.skippedText ? t('conv.lbrnText', { n: res.skippedText }) : '', add);
       } catch {
         fail(t('conv.failed', { fmt }));
       }
       return;
     }
     if (!SERVER_FORMATS.has(ext)) {
-      openFile(await file.text(), file.name);
+      openFile(await file.text(), file.name, '', add);
       return;
     }
     if (converting || busy) return;
@@ -889,8 +1015,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       const out = await api.convertFile(file);
       const note = out.pages > 1 ? t('conv.pages', { n: out.pages }) : '';
       // Keep the real extension for the label, but let the importer see the converted text.
-      openFile(out.text, file.name, note);
-      if (!importedParts.length) fail(t('conv.empty', { fmt }));
+      if (!openFile(out.text, file.name, note, add)) fail(t('conv.empty', { fmt }));
     } catch (err) {
       if (err instanceof api.ApiError && err.status === 401) {
         navigate('#/login');
@@ -916,10 +1041,19 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   el('drop').addEventListener('click', (e) => {
     if ((e.target as HTMLElement).id !== 'browse') fileInput.click();
   });
+  const openMany = async (list: File[], add: boolean): Promise<void> => {
+    for (let i = 0; i < list.length; i++) await openUpload(list[i]!, add || i > 0);
+  };
   fileInput.addEventListener('change', () => {
-    const f = fileInput.files?.[0];
-    if (f) void openUpload(f);
+    const list = Array.from(fileInput.files ?? []);
     fileInput.value = ''; // re-selecting the same file must fire 'change' again
+    if (list.length) void openMany(list, false);
+  });
+  const fileAdd = el<HTMLInputElement>('fileAdd');
+  fileAdd.addEventListener('change', () => {
+    const list = Array.from(fileAdd.files ?? []);
+    fileAdd.value = '';
+    if (list.length) void openMany(list, true);
   });
   const drop = el('drop');
   ['dragenter', 'dragover'].forEach((ev) =>
@@ -935,18 +1069,19 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     }),
   );
   drop.addEventListener('drop', (e) => {
-    const f = (e as DragEvent).dataTransfer?.files?.[0];
-    if (f) void openUpload(f);
+    const list = Array.from((e as DragEvent).dataTransfer?.files ?? []);
+    if (list.length) void openMany(list, false);
   });
   // Typing the REAL width or height rescales the whole import proportionally —
   // fixes files exported without unit info (common from CorelDRAW).
   const applyRealSize = (dim: 'w' | 'h'): void => {
-    if (!importedText || !(baseW > 0)) return;
+    const x = files[activeFile];
+    if (!x || !(x.w > 0)) return;
     const wanted = toMm(dim === 'w' ? 'realW' : 'realH');
-    const base = dim === 'w' ? baseW : baseH;
-    if (!(wanted > 0) || !(base > 0)) return;
-    importScale = wanted / base;
-    loadFile(importedText, importedName);
+    const cur = dim === 'w' ? x.w : x.h;
+    if (!(wanted > 0) || !(cur > 0)) return;
+    reloadFile(activeFile, { scale: x.scale * (wanted / cur) });
+    refreshJob();
   };
   el('realW').addEventListener('change', () => applyRealSize('w'));
   el('realH').addEventListener('change', () => applyRealSize('h'));
@@ -1000,7 +1135,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   runBtn.addEventListener('click', run);
   exportDxfBtn.addEventListener('click', async () => {
     if (!lastResult || !(await ensurePaid()) || !lastResult) return;
-    exportDxf(lastResult, lastParts, currentFine());
+    const layers = el<HTMLSelectElement>('dxfLayers').value as 'split' | 'source' | 'single';
+    exportDxf(lastResult, lastParts, currentFine(), { layers, blocks: checked('dxfBlocks'), partLayers });
   });
   exportPdfBtn.addEventListener('click', async () => {
     if (!lastResult) return;
@@ -1023,6 +1159,28 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       win,
     );
   });
+  // DXF export choices are remembered in this browser.
+  try {
+    const l = localStorage.getItem('nf_dxf_layers');
+    if (l === 'split' || l === 'source' || l === 'single') el<HTMLSelectElement>('dxfLayers').value = l;
+    el<HTMLInputElement>('dxfBlocks').checked = localStorage.getItem('nf_dxf_blocks') === '1';
+  } catch {
+    /* storage blocked — defaults */
+  }
+  el('dxfLayers').addEventListener('change', () => {
+    try {
+      localStorage.setItem('nf_dxf_layers', el<HTMLSelectElement>('dxfLayers').value);
+    } catch {
+      /* ignore */
+    }
+  });
+  el('dxfBlocks').addEventListener('change', () => {
+    try {
+      localStorage.setItem('nf_dxf_blocks', checked('dxfBlocks') ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  });
   el('showPath').addEventListener('change', () => {
     if (lastResult) render(lastResult);
   });
@@ -1036,6 +1194,20 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     return `<svg viewBox="${-sw} ${-sw} ${rem.width + 2 * sw} ${rem.height + 2 * sw}" xmlns="http://www.w3.org/2000/svg"><rect width="${rem.width}" height="${rem.height}" fill="#111827" stroke="#334155" stroke-width="${sw}"/><path d="${d}" fill="#475569"/></svg>`;
   };
   const remnantLabel = (r: store.RemnantEntry): string => (r.sheet ? `${r.name} · ${t('rem.sheetN', { n: r.sheet })}` : r.name);
+  // A remnant whose free area can take the whole current job gets a ✓.
+  const jobArea = (): number =>
+    currentParts().reduce((sum, p) => sum + Math.abs(contourArea(p.contour)) * (p.quantity ?? 1), 0);
+  const remnantFits = (r: store.RemnantEntry, need: number): boolean =>
+    need > 0 && r.free * (r.width - 2 * r.margin) * (r.height - 2 * r.margin) >= need * 1.15;
+  const remnantOptionText = (r: store.RemnantEntry, need = jobArea()): string =>
+    `${remnantFits(r, need) ? '✓ ' : ''}${remnantLabel(r)} · ${Math.round(r.width)}×${Math.round(r.height)} · ${Math.round(r.free * 100)}% ${t('rem.free')}${remnantFits(r, need) ? ` · ${t('rem.fits')}` : ''}`;
+  const markRemnantFit = (): void => {
+    const need = jobArea();
+    for (const opt of Array.from(remnantSel.options)) {
+      const r = remnantList.find((x) => x.id === opt.value);
+      if (r) opt.textContent = remnantOptionText(r, need);
+    }
+  };
   const showRemnant = (): void => {
     const rem = currentRemnant();
     const thumb = el('remnantThumb');
@@ -1060,7 +1232,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       remnantList
         .map(
           (r) =>
-            `<option value="${r.id}">${esc(remnantLabel(r))} · ${Math.round(r.width)}×${Math.round(r.height)} · ${Math.round(r.free * 100)}% ${esc(t('rem.free'))}</option>`,
+            `<option value="${r.id}">${esc(remnantOptionText(r))}</option>`,
         )
         .join('');
     remnantSel.value = remnantList.some((r) => r.id === want) ? want : '';
@@ -1107,14 +1279,14 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
 
   // ---- history: every finished job, reopened without paying again ----
   const saveRun = (r: NestResult): void => {
-    if (!runId || !importedText) return;
+    if (!runId || !files.length) return;
     void store
       .saveHistory({
         id: runId,
         at: Date.now(),
         name: importedName || 'Tasvir AI',
-        text: importedText,
-        scale: importScale,
+        files: files.map(job.jobData),
+        overrides: Object.fromEntries(overrides),
         mirror: mirrorMode(),
         result: r,
         parts: r.placements.length,
@@ -1163,14 +1335,23 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     setLen('spacing', c.spacing ?? 0);
     el<HTMLInputElement>('kerf').value = String(c.kerf ?? 0);
     el<HTMLInputElement>('holeFilling').checked = c.holeFilling === true;
-    el<HTMLInputElement>('allowRot').checked = (c.rotations?.length ?? 1) > 1;
+    const turns = new Set((c.rotations ?? [0]).map((r) => ((Math.round(r) % 360) + 360) % 360)).size;
+    const step = turns <= 1 ? '0' : String(Math.round(360 / turns));
+    el<HTMLSelectElement>('rotStep').value = ['0', '180', '90', '45', '15'].includes(step) ? step : '90';
+    el<HTMLInputElement>('maxSheets').value = c.sheet.quantity && Number.isFinite(c.sheet.quantity) ? String(c.sheet.quantity) : '';
     const preset =
       c.sheet.width === 1210 && c.sheet.height === 900 ? 'laser' : c.sheet.width === 2400 && c.sheet.height === 1200 ? 'rover' : 'custom';
     el<HTMLSelectElement>('machinePreset').value = preset;
     el<HTMLSelectElement>('mirrorMode').value = h.mirror || 'off';
     showRemnant();
-    importScale = h.scale;
-    loadFile(h.text, h.name);
+    const saved: job.JobFile[] = h.files ?? [
+      { id: 'f1', name: h.name, text: h.text ?? '', scale: h.scale ?? 1, note: '', prefix: '', layersOff: [] },
+    ];
+    files = saved.map(job.loadJobFile);
+    activeFile = 0;
+    overrides.clear();
+    for (const [k, v] of Object.entries(h.overrides ?? {})) overrides.set(k, v);
+    refreshJob();
     const parts = nestParts();
     const ids = new Set(parts.map((p) => p.id));
     if (!h.result.placements.every((p) => ids.has(p.partId))) {
@@ -1183,6 +1364,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     resultPaid = h.paid !== false;
     resultInstances = h.result.placements.length + h.result.unplaced.length;
     runId = h.id;
+    undoStack.length = 0;
     render(h.result);
     statusMsg(t('hist.restored', { name: h.name }));
     void refreshHistory();
@@ -1223,16 +1405,35 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     level: vq('.js-zoom-lvl'),
   });
 
-  // ---- hand editing: drag a part, R / ↻ turns it by 90° ----
+  // ---- hand editing: drag (also to another sheet), turn, nudge, remove, undo ----
   let editMode = false;
-  const rotateBtn = vq('.js-rotate') as HTMLButtonElement;
+  const editBar = el('editBar');
+  const syncEditBar = (index: number | null): void => {
+    const pl = index !== null ? lastResult?.placements[index] : undefined;
+    el('ebSel').textContent = pl ? t('edit.selected', { n: index! + 1, deg: Math.round(pl.rotation) }) : t('edit.pick');
+    editBar.querySelectorAll<HTMLButtonElement>('[data-rot], #ebRotate, #ebDelete').forEach((b) => {
+      b.disabled = !pl;
+    });
+    el<HTMLButtonElement>('ebUndo').disabled = undoStack.length === 0;
+  };
   const setEditMode = (on: boolean): void => {
     editMode = on;
     editBtn.classList.toggle('active', on);
-    rotateBtn.hidden = !on;
+    editBar.hidden = !on;
     viewport.classList.toggle('nf-edit', on);
     if (!on) editor.select(null);
-    if (on) statusMsg(t('app.editHint'));
+    else {
+      statusMsg(t('app.editHint'));
+      syncEditBar(editor.selected());
+    }
+  };
+  const undoEdit = (): void => {
+    const prev = undoStack.pop();
+    if (!prev) return;
+    render(prev, true);
+    editor.select(null);
+    saveEdit(prev);
+    statusMsg(t('edit.undone'));
   };
   editor = attachEditor({
     svgHost: el('svgHost'),
@@ -1244,15 +1445,28 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       return c ? (c.spacing ?? 0) + (c.kerf ?? 0) : toMm('spacing') + num('kerf');
     },
     commit: (next, index) => {
+      if (lastResult) {
+        undoStack.push(lastResult);
+        if (undoStack.length > 50) undoStack.shift();
+      }
       render(next, true);
       editor.select(index);
-      statusMsg(t('app.editSaved'));
+      statusMsg(t(index === null ? 'edit.deleted' : 'app.editSaved'));
       saveEdit(next);
     },
     reject: (verdict) => statusMsg(t(verdict === 'outside' ? 'app.editOutside' : 'app.editOverlap'), true),
+    selected: (i) => syncEditBar(i),
+    undo: undoEdit,
   });
   editBtn.addEventListener('click', () => setEditMode(!editMode));
-  rotateBtn.addEventListener('click', () => editor.rotateSelected());
+  editBar.addEventListener('click', (e) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
+    if (!b || b.disabled) return;
+    if (b.dataset.rot) editor.rotateSelected(Number(b.dataset.rot));
+    else if (b.id === 'ebRotate') editor.rotateSelected(Number(el<HTMLInputElement>('ebAngle').value) || 0);
+    else if (b.id === 'ebDelete') editor.deleteSelected();
+    else if (b.id === 'ebUndo') undoEdit();
+  });
 
   // Restore work that survived a re-render (e.g. a language switch): the mirror
   // state must be restored BEFORE rendering so a mirrored result is redrawn with
@@ -1260,16 +1474,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   const keepRemnant = savedWork?.remnantId ?? '';
   void refreshRemnants(keepRemnant);
   void refreshHistory();
-  if (savedWork) {
-    el<HTMLSelectElement>('mirrorMode').value = savedWork.mirrorMode || 'off';
-    if (savedWork.importInfo) importInfo.textContent = savedWork.importInfo;
-    if (savedWork.baseW > 0) {
-      el<HTMLInputElement>('realW').disabled = false;
-      el<HTMLInputElement>('realH').disabled = false;
-      setLen('realW', savedWork.baseW * savedWork.importScale);
-      setLen('realH', savedWork.baseH * savedWork.importScale);
-    }
-  }
+  if (savedWork) el<HTMLSelectElement>('mirrorMode').value = savedWork.mirrorMode || 'off';
+  syncJobUi();
   updateCostLabel();
   syncSheetInputs();
   if (lastResult) {
@@ -1314,15 +1520,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     zoom?.destroy();
     clearInterval(veilTimer);
     savedWork = {
-      importedParts,
-      importedText,
-      importedName,
-      importInfo: importInfo.textContent ?? '',
-      sources,
-      fineContours,
-      importScale,
-      baseW,
-      baseH,
+      files,
+      activeFile,
+      overrides: [...overrides],
       lastParts,
       lastResult,
       lastPlans,

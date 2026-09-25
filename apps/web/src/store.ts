@@ -1,4 +1,5 @@
 import type { NestResult, Ring } from '@nestflow/engine';
+import type { JobFile, PartOverride } from './job';
 
 /**
  * Local, per-browser storage of finished jobs (history) and saved remnants,
@@ -11,9 +12,12 @@ export interface HistoryEntry {
   id: string;
   at: number;
   name: string;
-  /** The imported file itself and the scale / mirror it was nested with. */
-  text: string;
-  scale: number;
+  /** The job's drawings (with scales and ignored layers) and per-part choices. */
+  files?: JobFile[];
+  overrides?: Record<string, PartOverride>;
+  /** Jobs saved before multi-file support: the one file and its scale. */
+  text?: string;
+  scale?: number;
   mirror: string;
   result: NestResult;
   parts: number;

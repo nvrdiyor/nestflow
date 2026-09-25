@@ -43,6 +43,10 @@ export interface ImportResult {
   simplifyTolMm?: number;
   /** Overall drawing size in mm (all parts as laid out in the file). */
   size?: { w: number; h: number };
+  /** Source layer of each part (DXF), for "keep layer names" export. */
+  partLayers?: Map<string, string>;
+  /** DXF layers found (entity counts), for cut / ignore choices. */
+  layers?: Array<{ name: string; count: number }>;
 }
 
 /** Overall bounding-box size of parts as they sit in the file (before per-part normalisation). */
@@ -285,8 +289,10 @@ export function contoursToParts(
   toleranceMm = SIMPLIFY_TOLERANCE_MM,
   startIndex = 0,
   captureFine = false,
+  layerOf?: (c: Contour) => string | undefined,
 ): ImportResult {
   const parts: Part[] = [];
+  const partLayers = new Map<string, string>();
   const warnings: string[] = [];
   const sources = new Map<string, VectorSource>();
   const fineContours = new Map<string, Contour>();
@@ -323,6 +329,8 @@ export function contoursToParts(
     const holes = holePairs.map((h) => h.light);
     const id = `p-${idx}`;
     parts.push({ id, label: `shape ${idx + 1}`, contour: { outer, holes }, quantity: 1 });
+    const layer = layerOf?.(c);
+    if (layer) partLayers.set(id, layer);
     if (captureFine) {
       const thin = (ring: Ring): Ring => simplifyRing(scaleRing(ring, mmPerUnit), FINE_TOLERANCE_MM);
       const fine: Contour = {
@@ -342,9 +350,10 @@ export function contoursToParts(
     }
   }
   const simplifyTolMm = lastFinalizeTol;
+  const extra = partLayers.size ? { partLayers } : {};
   return captureFine
-    ? { parts, warnings, sources, fineContours, simplifyTolMm }
-    : { parts, warnings, simplifyTolMm };
+    ? { parts, warnings, sources, fineContours, simplifyTolMm, ...extra }
+    : { parts, warnings, simplifyTolMm, ...extra };
 }
 
 const translateRing = (ring: Ring, dx: number, dy: number): Ring => ring.map((p) => ({ x: p.x + dx, y: p.y + dy }));
