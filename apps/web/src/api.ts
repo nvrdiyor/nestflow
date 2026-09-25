@@ -244,6 +244,42 @@ export async function completeNest(meta: {
   return res;
 }
 
+/** A file the browser cannot read (PDF, AI, EPS, CDR, DWG), converted on the server. */
+export interface ConvertedFile {
+  kind: 'pdf' | 'ps' | 'cdr' | 'dwg';
+  format: 'svg' | 'dxf';
+  text: string;
+  pages: number;
+}
+
+export async function convertFile(file: File): Promise<ConvertedFile> {
+  const token = localStorage.getItem(K_TOKEN);
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), 150_000);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/api/convert?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: file,
+      signal: abort.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await res.json()) as Record<string, unknown>;
+  } catch {
+    /* non-JSON (e.g. a proxy error page) */
+  }
+  if (!res.ok) throw new ApiError((body.error as string) ?? `Request failed (${res.status})`, res.status, body);
+  return body as unknown as ConvertedFile;
+}
+
 // ---------- admin ----------
 
 export function isAdmin(): boolean {

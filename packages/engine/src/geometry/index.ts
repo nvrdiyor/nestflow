@@ -7,3 +7,4 @@ export * from './offset.js';
 export * from './decompose.js';
 export * from './minkowski.js';
 export { offsetRegionClipper } from './clipper.js';
+export * from './arcfit.js';

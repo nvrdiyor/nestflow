@@ -157,7 +157,7 @@ export function renderLanding(root: HTMLElement, navigate: Nav): void {
     <div class="container">
       <p>${t('l.works')}</p>
       <div class="wordmarks">
-        <span>CorelDRAW</span><span>Illustrator</span><span>AutoCAD</span><span>Inkscape</span><span>SVG</span><span>DXF</span>
+        <span>CorelDRAW</span><span>Illustrator</span><span>AutoCAD</span><span>LightBurn</span><span>Inkscape</span><span>PDF</span><span>DXF</span><span>DWG</span>
       </div>
     </div>
   </section>

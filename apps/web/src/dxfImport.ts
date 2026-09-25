@@ -72,6 +72,68 @@ function entityGroups(pairs: Pair[]): EntityGroup[] {
   return groups;
 }
 
+interface BlockDef {
+  base: Point;
+  groups: EntityGroup[];
+}
+
+/**
+ * Block definitions from the BLOCKS section: name → base point + entities.
+ * INSERTs place these (logos, repeated letters, whole drawings in DWG files).
+ */
+function blockDefs(pairs: Pair[]): Map<string, BlockDef> {
+  const blocks = new Map<string, BlockDef>();
+  let i = 0;
+  for (; i < pairs.length - 1; i++) {
+    if (pairs[i]!.code === 0 && pairs[i]!.value === 'SECTION' && pairs[i + 1]!.code === 2 && pairs[i + 1]!.value === 'BLOCKS') break;
+  }
+  if (i >= pairs.length - 1) return blocks;
+  let cur: { name: string; def: BlockDef } | null = null;
+  let group: EntityGroup | null = null;
+  for (i += 2; i < pairs.length; i++) {
+    const p = pairs[i]!;
+    if (p.code === 0) {
+      if (group && cur) cur.def.groups.push(group);
+      group = null;
+      if (p.value === 'ENDSEC') break;
+      if (p.value === 'BLOCK') {
+        let name = '';
+        let bx = 0;
+        let by = 0;
+        for (let k = i + 1; k < pairs.length && pairs[k]!.code !== 0; k++) {
+          const q = pairs[k]!;
+          if (q.code === 2 && !name) name = q.value;
+          else if (q.code === 10) bx = Number.parseFloat(q.value) || 0;
+          else if (q.code === 20) by = Number.parseFloat(q.value) || 0;
+        }
+        cur = { name, def: { base: { x: bx, y: by }, groups: [] } };
+        if (name) blocks.set(name, cur.def);
+        continue;
+      }
+      if (p.value === 'ENDBLK') {
+        cur = null;
+        continue;
+      }
+      if (cur) group = { type: p.value, pairs: [] };
+    } else if (group) {
+      group.pairs.push(p);
+    }
+  }
+  return blocks;
+}
+
+/** 2D affine [a b c d e f]: x' = a·x + c·y + e, y' = b·x + d·y + f. */
+type Xf = [number, number, number, number, number, number];
+const XF_ID: Xf = [1, 0, 0, 1, 0, 0];
+const xfMul = (m: Xf, n: Xf): Xf => [
+  m[0] * n[0] + m[2] * n[1],
+  m[1] * n[0] + m[3] * n[1],
+  m[0] * n[2] + m[2] * n[3],
+  m[1] * n[2] + m[3] * n[3],
+  m[0] * n[4] + m[2] * n[5] + m[4],
+  m[1] * n[4] + m[3] * n[5] + m[5],
+];
+
 function first(pairs: Pair[], code: number): number | undefined {
   for (const p of pairs) if (p.code === code) return Number.parseFloat(p.value);
   return undefined;
@@ -222,8 +284,21 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
   const openSegments: Point[][] = [];
   const warnings: string[] = [];
   let inserts = 0;
+  let missingBlocks = 0;
   let splines = 0;
+  const blocks = blockDefs(allPairs);
 
+  let xf: Xf = XF_ID;
+  const tx = (pts: Point[]): Point[] =>
+    xf === XF_ID ? pts : pts.map((p) => ({ x: xf[0] * p.x + xf[2] * p.y + xf[4], y: xf[1] * p.x + xf[3] * p.y + xf[5] }));
+  const addClosed = (pts: Point[]): void => {
+    closedRings.push(tx(pts) as Ring);
+  };
+  const addOpen = (pts: Point[]): void => {
+    openSegments.push(tx(pts));
+  };
+
+  const collect = (groups: EntityGroup[], depth: number): void => {
   for (let gi = 0; gi < groups.length; gi++) {
     const g = groups[gi]!;
     // Our own exports put the sheet boundary on a `frame` layer — never a part.
@@ -236,7 +311,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
         const x2 = first(g.pairs, 11);
         const y2 = first(g.pairs, 21);
         if ([x1, y1, x2, y2].every((v) => v !== undefined)) {
-          openSegments.push([
+          addOpen([
             { x: x1!, y: y1! },
             { x: x2!, y: y2! },
           ]);
@@ -245,7 +320,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
       }
       case 'LWPOLYLINE': {
         const { pts, closed } = lwpolyline(g.pairs, arcTol);
-        if (pts.length >= 2) (closed ? closedRings : openSegments).push(pts as Ring);
+        if (pts.length >= 2) (closed ? addClosed : addOpen)(pts as Ring);
         break;
       }
       case 'POLYLINE': {
@@ -259,7 +334,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
         }
         if (gi + 1 < groups.length && groups[gi + 1]!.type === 'SEQEND') gi++;
         const pts = polylineFromVertices(verts, closed, arcTol);
-        if (pts.length >= 2) (closed ? closedRings : openSegments).push(pts as Ring);
+        if (pts.length >= 2) (closed ? addClosed : addOpen)(pts as Ring);
         break;
       }
       case 'CIRCLE': {
@@ -267,7 +342,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
         const cy = first(g.pairs, 20);
         const r = first(g.pairs, 40);
         if (cx !== undefined && cy !== undefined && r !== undefined && r > 0) {
-          closedRings.push(arcPoints(cx, cy, r, 0, 360, arcTol).slice(0, -1));
+          addClosed(arcPoints(cx, cy, r, 0, 360, arcTol).slice(0, -1));
         }
         break;
       }
@@ -278,7 +353,7 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
         const a0 = first(g.pairs, 50);
         const a1 = first(g.pairs, 51);
         if ([cx, cy, r, a0, a1].every((v) => v !== undefined) && r! > 0) {
-          openSegments.push(arcPoints(cx!, cy!, r!, a0!, a1!, arcTol));
+          addOpen(arcPoints(cx!, cy!, r!, a0!, a1!, arcTol));
         }
         break;
       }
@@ -305,8 +380,8 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
             pts.push({ x: cx + ex * Math.cos(rot) - ey * Math.sin(rot), y: cy + ex * Math.sin(rot) + ey * Math.cos(rot) });
           }
           const full = Math.abs(sweep - Math.PI * 2) < 1e-6;
-          if (full) closedRings.push(pts.slice(0, -1));
-          else openSegments.push(pts);
+          if (full) addClosed(pts.slice(0, -1));
+          else addOpen(pts);
         }
         break;
       }
@@ -337,19 +412,50 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
         if (ctrl.length >= 2) pts = sampleBspline(ctrl, degree, knots);
         else if (fit.length >= 2) pts = fit;
         if (pts.length >= 2) {
-          if ((Number(flags) & 1) === 1) closedRings.push(pts as Ring);
-          else openSegments.push(pts);
+          if ((Number(flags) & 1) === 1) addClosed(pts as Ring);
+          else addOpen(pts);
           splines++;
         }
         break;
       }
-      case 'INSERT':
+      case 'INSERT': {
+        // Place the block: T(insert) · R(rotation) · [array offset] · S(scale) · T(-base).
+        const name = g.pairs.find((pr) => pr.code === 2)?.value ?? '';
+        const def = blocks.get(name);
+        if (!def || depth >= 8) {
+          missingBlocks++;
+          break;
+        }
         inserts++;
+        const ix = first(g.pairs, 10) ?? 0;
+        const iy = first(g.pairs, 20) ?? 0;
+        const sx = first(g.pairs, 41) ?? 1;
+        const sy = first(g.pairs, 42) ?? sx;
+        const rot = ((first(g.pairs, 50) ?? 0) * Math.PI) / 180;
+        const cols = Math.max(1, Math.min(500, Math.round(first(g.pairs, 70) ?? 1)));
+        const rows = Math.max(1, Math.min(500, Math.round(first(g.pairs, 71) ?? 1)));
+        const dc = first(g.pairs, 44) ?? 0;
+        const dr = first(g.pairs, 45) ?? 0;
+        const cos = Math.cos(rot);
+        const sin = Math.sin(rot);
+        const parent = xf;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const place: Xf = [cos, sin, -sin, cos, ix, iy];
+            const local: Xf = [sx, 0, 0, sy, c * dc - sx * def.base.x, r * dr - sy * def.base.y];
+            xf = xfMul(parent, xfMul(place, local));
+            collect(def.groups, depth + 1);
+          }
+        }
+        xf = parent;
         break;
+      }
       default:
         break;
     }
   }
+  };
+  collect(groups, 0);
 
   // Tolerance for chaining, scaled to the drawing size.
   let minX = Infinity;
@@ -408,7 +514,8 @@ export function importDxfParts(text: string, mmPerUnit = 1): ImportResult {
     for (const ring of rings) for (const p of ring) p.y = flipAt - p.y;
   }
 
-  if (inserts > 0) warnings.push(`${inserts} block insert(s) skipped — explode blocks before export.`);
+  if (missingBlocks > 0) warnings.push(`${missingBlocks} block insert(s) skipped — explode blocks before export.`);
+  void inserts;
   if (openCount > 0) warnings.push(`${openCount} open outline(s) could not be closed.`);
   void splines;
 

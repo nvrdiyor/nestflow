@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildServer } from '../src/server.js';
 import { nestCost } from '../src/credits.js';
+import { ConvertError, svgFromCdrXhtml } from '../src/convert.js';
 
 let app: FastifyInstance;
 
@@ -538,5 +539,67 @@ describe('period discounts', () => {
     expect(saved.json()).toMatchObject({ discount6: 15, discount12: 25 });
     expect((await dApp.inject({ method: 'GET', url: '/api/config' })).json().discounts).toEqual({ '6': 15, '12': 25 });
     await dApp.close();
+  });
+});
+
+describe('file conversion', () => {
+  let conv: Awaited<ReturnType<typeof buildServer>>;
+  let token = '';
+  const calls: string[] = [];
+  beforeAll(async () => {
+    conv = await buildServer({
+      dbFile: ':memory:',
+      jwtSecret: 'conv-secret',
+      adminUsername: 'admin',
+      adminPassword: 'pw',
+      converter: async (input, kind) => {
+        calls.push(kind);
+        if (input.includes('BROKEN')) throw new ConvertError('failed', 'bad file');
+        return kind === 'dwg'
+          ? { format: 'dxf', text: '0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF', pages: 1 }
+          : { format: 'svg', text: '<svg xmlns="http://www.w3.org/2000/svg"/>', pages: 3 };
+      },
+    });
+    const r = await conv.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'conv@example.com', password: 'secret123', name: 'Conv' } });
+    token = r.json().token;
+  });
+  afterAll(async () => conv.close());
+  const post = (body: Buffer | string, name: string, auth = true) =>
+    conv.inject({
+      method: 'POST',
+      url: `/api/convert?name=${encodeURIComponent(name)}`,
+      headers: { 'content-type': 'application/octet-stream', ...(auth ? { authorization: `Bearer ${token}` } : {}) },
+      payload: typeof body === 'string' ? Buffer.from(body, 'latin1') : body,
+    });
+
+  it('needs a signed-in user', async () => {
+    expect((await post('%PDF-1.7 x', 'a.pdf', false)).statusCode).toBe(401);
+  });
+
+  it('recognises formats by their bytes and converts them', async () => {
+    const pdf = await post('%PDF-1.7\n...', 'logo.ai');
+    expect(pdf.statusCode).toBe(200);
+    expect(pdf.json()).toMatchObject({ kind: 'pdf', format: 'svg', pages: 3 });
+    expect((await post('%!PS-Adobe-3.0 EPSF-3.0', 'x.eps')).json().kind).toBe('ps');
+    expect((await post('AC1032 dwg', 'plan.dwg')).json()).toMatchObject({ kind: 'dwg', format: 'dxf' });
+    expect((await post('RIFF\0\0\0\0CDRvvers', 'sign.cdr')).json().kind).toBe('cdr');
+    expect((await post('PK\x03\x04 zip', 'sign.cdr')).json().kind).toBe('cdr');
+    expect(calls).toEqual(['pdf', 'ps', 'dwg', 'cdr', 'cdr']);
+  });
+
+  it('refuses unknown data and reports failed conversions', async () => {
+    expect((await post('hello world', 'notes.txt')).statusCode).toBe(415);
+    expect((await post('PK\x03\x04 zip', 'archive.zip')).statusCode).toBe(415);
+    expect((await post('%PDF-1.4 BROKEN', 'bad.pdf')).statusCode).toBe(422);
+    expect((await post(Buffer.alloc(0), 'empty.pdf')).statusCode).toBe(400);
+  });
+
+  it('extracts the first page of a CorelDRAW XHTML dump as plain SVG', () => {
+    const x = '<html xmlns:svg="http://www.w3.org/2000/svg"><body><svg:svg width="2in" height="1in" viewBox="0 0 2 1"><svg:path d="M0 0L1 0L1 1Z"/></svg:svg><svg:svg><svg:rect/></svg:svg></body></html>';
+    const page = svgFromCdrXhtml(x)!;
+    expect(page.pages).toBe(2);
+    expect(page.svg).toContain('<svg xmlns="http://www.w3.org/2000/svg" width="2in"');
+    expect(page.svg).toContain('<path d="M0 0L1 0L1 1Z"/></svg>');
+    expect(page.svg).not.toContain('svg:');
   });
 });

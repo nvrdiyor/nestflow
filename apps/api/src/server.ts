@@ -21,6 +21,7 @@ import {
   type Strategy,
 } from './credits.js';
 import { TelegramAuth, TG_EMAIL_DOMAIN, type TelegramAuthOptions } from './tgauth.js';
+import { ConvertError, detectKind, Gate, MAX_CONVERT_BYTES, systemConverter, type Converter } from './convert.js';
 import type { TgUpdate } from './telegram.js';
 
 export interface ServerOptions {
@@ -40,6 +41,8 @@ export interface ServerOptions {
    */
   telegram?: TelegramAuthOptions;
   logger?: boolean;
+  /** PDF / AI / EPS / CDR / DWG → SVG or DXF (default: the command-line tools in the image). */
+  converter?: Converter;
   /**
    * Proxy trust for client-IP resolution (rate-limit buckets key on req.ip).
    * MUST stay false when the app is exposed directly — `true`/too-generous
@@ -294,6 +297,37 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
     if (!user) return reply.code(401).send({ error: 'Unauthorized' });
     return { user: toPublic(user) };
   });
+
+  // ---------- file conversion (formats the browser cannot read) ----------
+  const converter = opts.converter ?? systemConverter;
+  const gate = new Gate(2, 6);
+  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: MAX_CONVERT_BYTES }, (_req, body, done) =>
+    done(null, body),
+  );
+  app.post(
+    '/api/convert',
+    { bodyLimit: MAX_CONVERT_BYTES, config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const payload = await requireUser(req, reply);
+      if (!payload) return reply;
+      const body = req.body;
+      if (!Buffer.isBuffer(body) || body.length === 0) return reply.code(400).send({ error: 'empty_file' });
+      const name = String((req.query as { name?: unknown }).name ?? '').slice(0, 200);
+      const kind = detectKind(name, body);
+      if (!kind) return reply.code(415).send({ error: 'unsupported_format' });
+      try {
+        const out = await gate.run(() => converter(body, kind));
+        if (out === Gate.BUSY) return reply.code(503).send({ error: 'busy' });
+        return { kind, ...out };
+      } catch (err) {
+        if (err instanceof ConvertError && err.code === 'unavailable') {
+          app.log.error(err.message);
+          return reply.code(501).send({ error: 'converter_unavailable' });
+        }
+        return reply.code(422).send({ error: 'convert_failed' });
+      }
+    },
+  );
 
   // ---------- nesting / credits ----------
   app.post('/api/nest/quote', async (req, reply) => {

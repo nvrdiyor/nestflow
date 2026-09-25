@@ -1,3 +1,5 @@
+import { chmodSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { env } from './env.js';
 import { buildServer } from './server.js';
 import { TelegramBot } from './telegram.js';
@@ -12,6 +14,15 @@ for (let attempt = 1; bot && !botUsername && attempt <= 3; attempt++) {
   } catch (err) {
     console.error(`Telegram getMe failed (attempt ${attempt}/3): ${err instanceof Error ? err.message : String(err)}`);
     await new Promise((r) => setTimeout(r, 2000 * attempt));
+  }
+}
+
+// File converters run as `nobody`; the database and JWT secret stay root-only.
+if (typeof process.getuid === 'function' && process.getuid() === 0) {
+  try {
+    chmodSync(dirname(env.dbFile), 0o700);
+  } catch {
+    /* read-only or missing folder — the DB layer reports real problems */
   }
 }
 

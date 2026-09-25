@@ -124,6 +124,48 @@ function captureSource(node: Element, ctm: DOMMatrix | null, mmPerUnit: number):
   return { markup, matrix: scaled(base, mmPerUnit) };
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+/** Containers whose geometry is never drawn by itself (only referenced). */
+const NON_RENDERED = 'defs,clipPath,mask,pattern,marker,symbol,linearGradient,radialGradient,filter,title,desc,metadata';
+
+/**
+ * Makes referenced geometry explicit: every <use> becomes a real copy of what
+ * it points at (text converted by PDF tools, CorelDRAW symbols and repeated
+ * logos all arrive as <use>), and definition-only containers are removed so
+ * their shapes are not imported as stray parts.
+ */
+function inlineUses(root: Element): void {
+  for (let pass = 0; pass < 8; pass++) {
+    const uses = Array.from(root.querySelectorAll('use')).filter((u) => !u.closest(NON_RENDERED));
+    if (!uses.length) break;
+    for (const use of uses) {
+      const href = use.getAttribute('href') ?? use.getAttributeNS('http://www.w3.org/1999/xlink', 'href') ?? '';
+      const id = href.startsWith('#') ? href.slice(1) : '';
+      const target = id ? root.querySelector(`[id="${CSS.escape(id)}"]`) : null;
+      const g = root.ownerDocument.createElementNS(SVG_NS, 'g');
+      const x = Number(use.getAttribute('x')) || 0;
+      const y = Number(use.getAttribute('y')) || 0;
+      const tf = [use.getAttribute('transform') ?? '', x || y ? `translate(${x} ${y})` : ''].filter(Boolean).join(' ');
+      if (tf) g.setAttribute('transform', tf);
+      for (const a of ['style', 'fill', 'stroke', 'fill-rule']) {
+        const v = use.getAttribute(a);
+        if (v !== null) g.setAttribute(a, v);
+      }
+      if (target && !target.contains(use)) {
+        if (target.tagName.toLowerCase() === 'symbol') {
+          for (const c of Array.from(target.childNodes)) g.appendChild(c.cloneNode(true));
+        } else {
+          const copy = target.cloneNode(true) as Element;
+          copy.removeAttribute('id');
+          g.appendChild(copy);
+        }
+      }
+      use.replaceWith(g);
+    }
+  }
+  root.querySelectorAll(NON_RENDERED).forEach((n) => n.remove());
+}
+
 export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
   const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
   if (doc.querySelector('parsererror')) return { parts: [], warnings: ['The SVG could not be parsed.'] };
@@ -142,6 +184,7 @@ export function importSvgParts(svgText: string, mmPerUnit = 1): ImportResult {
       mounted.setAttribute('height', `${vb[3]}px`);
     }
   }
+  inlineUses(mounted);
   holder.appendChild(mounted);
   document.body.appendChild(holder);
 

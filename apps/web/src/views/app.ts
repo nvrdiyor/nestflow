@@ -15,6 +15,7 @@ import {
 } from '@nestflow/engine';
 import { importSvgParts } from '../svgImport';
 import { importDxfParts } from '../dxfImport';
+import { lbrnToSvg } from '../lbrnImport';
 import { exportDxf } from '../exporters';
 import { openReport } from '../report';
 import { attachEditor, type Editor } from '../editor';
@@ -59,6 +60,12 @@ interface SavedWork {
 }
 let savedWork: SavedWork | null = null;
 
+/** Everything the upload box takes; the binary formats are converted on the server. */
+const ACCEPT = '.svg,.dxf,.pdf,.ai,.eps,.ps,.cdr,.dwg,.lbrn,.lbrn2,image/svg+xml,application/pdf';
+const SERVER_FORMATS = new Set(['pdf', 'ai', 'eps', 'ps', 'cdr', 'dwg']);
+const MAX_UPLOAD = 60 * 1024 * 1024;
+const extOf = (name: string): string => (/\.([a-z0-9]+)$/i.exec(name)?.[1] ?? '').toLowerCase();
+
 /** All rotations are always allowed; the engine always searches at max effort. */
 const ROTATIONS = [0, 90, 180, 270];
 const STRATEGY: Strategy = 'max';
@@ -69,7 +76,7 @@ const toolMarkup = (): string => `
     <section class="group">
       <h2>${t('app.yourParts')}</h2>
       <div id="drop" class="drop">
-        <input id="file" type="file" accept=".svg,.dxf,image/svg+xml" hidden />
+        <input id="file" type="file" accept="${ACCEPT}" hidden />
         <i data-lucide="upload" class="drop-ic"></i>
         <span>${t('app.dropHere')} <button type="button" id="browse" class="link">${t('app.browse')}</button></span>
       </div>
@@ -705,6 +712,14 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     return w;
   };
 
+  // The format as the user knows it (a PDF stays "PDF" after conversion).
+  const fmtLabel = (text: string, name: string): string => {
+    const ext = extOf(name);
+    if (SERVER_FORMATS.has(ext)) return ext.toUpperCase();
+    if (ext === 'lbrn' || ext === 'lbrn2') return 'LightBurn';
+    return isDxf(text, name) ? 'DXF' : 'SVG';
+  };
+  let importNote = '';
   const loadFile = (text: string, name: string): void => {
     importedText = text;
     importedName = name;
@@ -742,8 +757,9 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     }
     const sizeStr = impW > 0 ? ` · ${Math.round(impW)}×${Math.round(impH)} mm` : '';
     importInfo.textContent =
-      t('app.importedShapes', { n: instanceCount(parts), fmt: isDxf(text, name) ? 'DXF' : 'SVG' }) +
+      t('app.importedShapes', { n: instanceCount(parts), fmt: fmtLabel(text, name) }) +
       sizeStr +
+      (importNote ? ' · ' + importNote : '') +
       (warnings.length ? ' · ' + localizeWarning(warnings[0]!) : '');
     updateCostLabel();
     showPreview(t('app.partsReady'));
@@ -752,9 +768,69 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // A NEW file always starts at its true size: a real-size correction typed
   // for the previous file must never silently rescale the next one (that bug
   // made a 12.5 cm part come out 12.2 cm).
-  const openFile = (text: string, name: string): void => {
+  const openFile = (text: string, name: string, note = ''): void => {
     importScale = 1;
+    importNote = note;
     loadFile(text, name);
+  };
+
+  // Any supported file: SVG / DXF read as text, LightBurn converted here,
+  // PDF / AI / EPS / CDR / DWG converted on the server.
+  let converting = false;
+  const openUpload = async (file: File): Promise<void> => {
+    const ext = extOf(file.name);
+    const fmt = SERVER_FORMATS.has(ext) ? ext.toUpperCase() : ext === 'lbrn' || ext === 'lbrn2' ? 'LightBurn' : ext.toUpperCase();
+    const fail = (msg: string): void => {
+      importInfo.textContent = msg;
+      importInfo.classList.add('warn');
+      statusMsg(msg, true);
+    };
+    if (file.size > MAX_UPLOAD) {
+      fail(t('conv.tooBig', { mb: Math.round(MAX_UPLOAD / 1024 / 1024) }));
+      return;
+    }
+    if (ext === 'lbrn' || ext === 'lbrn2') {
+      try {
+        const res = lbrnToSvg(await file.text());
+        openFile(res.svg, file.name, res.skippedText ? t('conv.lbrnText', { n: res.skippedText }) : '');
+      } catch {
+        fail(t('conv.failed', { fmt }));
+      }
+      return;
+    }
+    if (!SERVER_FORMATS.has(ext)) {
+      openFile(await file.text(), file.name);
+      return;
+    }
+    if (converting || busy) return;
+    converting = true;
+    importInfo.classList.remove('warn');
+    importInfo.textContent = t('conv.working', { fmt });
+    statusMsg(t('conv.working', { fmt }));
+    try {
+      const out = await api.convertFile(file);
+      const note = out.pages > 1 ? t('conv.pages', { n: out.pages }) : '';
+      // Keep the real extension for the label, but let the importer see the converted text.
+      openFile(out.text, file.name, note);
+      if (!importedParts.length) fail(t('conv.empty', { fmt }));
+    } catch (err) {
+      if (err instanceof api.ApiError && err.status === 401) {
+        navigate('#/login');
+        return;
+      }
+      const code = err instanceof api.ApiError ? err.message : '';
+      fail(
+        code === 'converter_unavailable'
+          ? t('conv.unavailable', { fmt })
+          : code === 'busy'
+            ? t('conv.busy')
+            : code === 'unsupported_format'
+              ? t('conv.unsupported', { fmt })
+              : t('conv.failed', { fmt }),
+      );
+    } finally {
+      converting = false;
+    }
   };
 
   const fileInput = el<HTMLInputElement>('file');
@@ -764,7 +840,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   });
   fileInput.addEventListener('change', () => {
     const f = fileInput.files?.[0];
-    if (f) f.text().then((t) => openFile(t, f.name));
+    if (f) void openUpload(f);
     fileInput.value = ''; // re-selecting the same file must fire 'change' again
   });
   const drop = el('drop');
@@ -782,7 +858,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   );
   drop.addEventListener('drop', (e) => {
     const f = (e as DragEvent).dataTransfer?.files?.[0];
-    if (f) f.text().then((t) => openFile(t, f.name));
+    if (f) void openUpload(f);
   });
   // Typing the REAL width or height rescales the whole import proportionally —
   // fixes files exported without unit info (common from CorelDRAW).
