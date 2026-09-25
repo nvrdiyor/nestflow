@@ -39,6 +39,8 @@ export interface PlanSettings {
   /** Percent off for 6- and 12-month purchases. */
   discount6: number;
   discount12: number;
+  /** 'nest' = each nest costs credits; 'export' = nesting free, downloads cost. */
+  chargeOn: 'nest' | 'export';
 }
 
 /** Public server configuration. */
@@ -50,6 +52,8 @@ export interface PublicConfig {
   salesContact: string;
   /** Percent off by period length in months, e.g. { '6': 10, '12': 20 }. */
   discounts: Record<string, number>;
+  /** When credits are charged: each nest, or the DXF / PDF download. */
+  chargeOn?: 'nest' | 'export';
 }
 
 export interface AdminOverview {
@@ -149,6 +153,7 @@ const FALLBACK_CONFIG: PublicConfig = {
   trialDays: 7,
   salesContact: 'dior_react',
   discounts: { '6': 10, '12': 20 },
+  chargeOn: 'nest',
 };
 
 let configPromise: Promise<PublicConfig> | null = null;

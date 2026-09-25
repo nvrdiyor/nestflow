@@ -24,9 +24,14 @@ const esc = (s: string): string =>
 
 const mm = (v: number): string => (Math.round(v * 10) / 10).toString();
 
-export function openReport(input: ReportInput): void {
+/**
+ * `target`: a window opened earlier inside the click (when the download is
+ * charged first, the report is written after an await — a fresh window.open
+ * there would be caught by the popup blocker).
+ */
+export function openReport(input: ReportInput, target?: Window | null): void {
   const { result, parts, cut } = input;
-  const win = window.open('', '_blank');
+  const win = target ?? window.open('', '_blank');
   if (!win) return;
   const W = result.config.sheet.width;
   const H = result.config.sheet.height;

@@ -129,6 +129,7 @@ const settingsSchema = z.object({
   trialDays: z.number().int().min(0).max(365).optional(),
   discount6: z.number().int().min(0).max(90).optional(),
   discount12: z.number().int().min(0).max(90).optional(),
+  chargeOn: z.enum(['nest', 'export']).optional(),
   salesContact: z
     .string()
     .trim()
@@ -156,6 +157,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       salesContact: raw.salesContact || d.salesContact,
       discount6: int(raw.discount6, d.discount6),
       discount12: int(raw.discount12, d.discount12),
+      chargeOn: raw.chargeOn === 'export' ? 'export' : 'nest',
     };
   };
   // VIP, the promo switch, or a free account still inside its trial nest without limits.
@@ -235,6 +237,7 @@ export async function buildServer(opts: ServerOptions): Promise<FastifyInstance>
       salesContact: s.salesContact,
       /** Percent off by period length in months (periods not listed: no discount). */
       discounts: { '6': s.discount6, '12': s.discount12 },
+      chargeOn: s.chargeOn,
     };
   });
 

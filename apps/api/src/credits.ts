@@ -38,6 +38,11 @@ export interface PlanSettings {
   /** Percent off when a plan is bought for 6 / 12 months at once. */
   discount6: number;
   discount12: number;
+  /**
+   * When a job is charged: 'nest' — every finished nest (default); 'export' —
+   * nesting is free and the DXF / PDF download is what costs credits.
+   */
+  chargeOn: 'nest' | 'export';
 }
 
 export function defaultSettings(): PlanSettings {
@@ -50,6 +55,7 @@ export function defaultSettings(): PlanSettings {
     salesContact: 'dior_react',
     discount6: 10,
     discount12: 20,
+    chargeOn: 'nest',
   };
 }
 

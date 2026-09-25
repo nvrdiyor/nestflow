@@ -57,6 +57,8 @@ interface SavedWork {
   remnantId: string;
   resultRemnantId: string | null;
   resultFit: boolean;
+  resultPaid: boolean;
+  resultInstances: number;
 }
 let savedWork: SavedWork | null = null;
 
@@ -210,6 +212,10 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   // The remnant the on-screen result was nested on, and whether it is a fit-to-parts crop.
   let resultRemnantId: string | null = savedWork?.resultRemnantId ?? null;
   let resultFit = savedWork?.resultFit ?? false;
+  // "Pay to download" mode: the on-screen result is free until it is exported.
+  let chargeOn: 'nest' | 'export' = 'nest';
+  let resultPaid = savedWork?.resultPaid ?? true;
+  let resultInstances = savedWork?.resultInstances ?? 0;
   const esc = (s: string): string =>
     s.replace(/[&<>"']/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'));
 
@@ -306,8 +312,68 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       if (u.credits >= nestCost(n)) suffix = ` · ${nestCost(n)} ${t('nav.credits')}`;
       else if ((u.freeLeft ?? 0) > 0) suffix = ` · ${t('plan.runFree', { n: u.freeLeft ?? 0 })}`;
     }
-    runBtn.textContent = t('app.nestLayout') + suffix;
+    runBtn.textContent = t('app.nestLayout') + (chargeOn === 'export' ? (n ? ` · ${t('plan.nestFree')}` : '') : suffix);
     runBtn.disabled = busy || n === 0;
+    updateExportLabels();
+  };
+
+  // In "pay to download" mode the export buttons carry the price until paid.
+  const updateExportLabels = (): void => {
+    let suffix = '';
+    const u = api.cachedUser();
+    if (lastResult && !resultPaid && u && !u.vip) {
+      const cost = nestCost(resultInstances || lastResult.placements.length);
+      if (u.credits >= cost) suffix = ` · ${cost} ${t('nav.credits')}`;
+      else if ((u.freeLeft ?? 0) > 0) suffix = ` · ${t('plan.runFree', { n: u.freeLeft ?? 0 })}`;
+    }
+    exportDxfBtn.textContent = t('app.downloadDxf') + suffix;
+    exportPdfBtn.textContent = t('app.downloadPdf') + suffix;
+  };
+
+  /** Charges the on-screen result once (pay-to-download mode); true when it may be exported. */
+  const ensurePaid = async (): Promise<boolean> => {
+    if (resultPaid || !lastResult) return !!lastResult;
+    const u = api.cachedUser();
+    if (!api.isLoggedIn() || !u) {
+      navigate('#/login');
+      return false;
+    }
+    const r = lastResult;
+    const instances = resultInstances || r.placements.length;
+    if (!canAfford(u, instances)) {
+      const cost = nestCost(instances);
+      const reason = u.credits > 0 ? t('plan.notEnough', { cost, have: u.credits }) : t('plan.outOfFree');
+      statusMsg(reason, true);
+      openPlans(u, reason);
+      return false;
+    }
+    try {
+      await api.completeNest({
+        parts: instances,
+        strategy: STRATEGY,
+        sheets: r.sheetsUsed,
+        utilPct: Math.min(100, r.metrics.utilization * 100),
+      });
+    } catch (err) {
+      if (err instanceof api.ApiError && err.status === 401) {
+        navigate('#/login');
+        return false;
+      }
+      if (err instanceof api.ApiError && err.status === 402) {
+        const reason = t('plan.outOfFree');
+        statusMsg(reason, true);
+        openPlans(api.cachedUser(), reason);
+        return false;
+      }
+      statusMsg(t('app.exportChargeFail'), true);
+      return false;
+    }
+    resultPaid = true;
+    const fresh = api.cachedUser();
+    if (fresh) refreshPill(fresh);
+    updateCostLabel();
+    if (lastResult) saveRun(lastResult);
+    return true;
   };
 
   // The nav plan pill: redrawn whenever the account changes; opens the plans dialog.
@@ -451,6 +517,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     exportPdfBtn.disabled = false;
     editBtn.disabled = false;
     saveRemnantBtn.disabled = resultFit || r.placements.length === 0;
+    updateExportLabels();
   };
 
   // Parallel search lanes: every lane runs the same job from different seed
@@ -532,7 +599,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     }
     const instances = instanceCount(parts);
     const cost = u.vip ? 0 : nestCost(instances);
-    if (!canAfford(u, instances)) {
+    if (chargeOn === 'nest' && !canAfford(u, instances)) {
       // Free nests used up and not enough credits: show the plans, don't compute.
       const reason =
         u.credits > 0 ? t('plan.notEnough', { cost, have: u.credits }) : t('plan.outOfFree');
@@ -609,7 +676,15 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     // + enabled exports) only appears once the charge succeeds, so blocking or
     // failing /api/nest/complete cannot yield a free, exportable nest. `busy`
     // stays true through the await so a second run can't start mid-charge.
-    if (runCtx) {
+    if (runCtx && chargeOn === 'export') {
+      // Nesting is free in this mode — the download is what gets charged.
+      const ctx = runCtx;
+      runCtx = null;
+      lastParts = ctx.parts;
+      resultRemnantId = ctx.remnantId;
+      resultPaid = api.cachedUser()?.vip === true;
+      resultInstances = ctx.instances;
+    } else if (runCtx) {
       const ctx = runCtx;
       runCtx = null;
       try {
@@ -623,6 +698,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
         if (fresh) refreshPill(fresh);
         lastParts = ctx.parts;
         resultRemnantId = ctx.remnantId;
+        resultPaid = true;
+        resultInstances = ctx.instances;
       } catch (err) {
         busy = false;
         runBtn.disabled = false;
@@ -656,7 +733,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     } else {
       statusMsg(
         t('app.done', { sec: (r.elapsedMs / 1000).toFixed(1), n: r.placements.length, layouts: lanes.evals }) +
-          (r.unplaced.length ? ` · ${t('app.didNotFit', { n: r.unplaced.length })}` : ''),
+          (r.unplaced.length ? ` · ${t('app.didNotFit', { n: r.unplaced.length })}` : '') +
+          (resultPaid ? '' : ` · ${t('app.payToExport')}`),
       );
     }
     updateCostLabel();
@@ -920,18 +998,30 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     if (currentParts().length) showPreview(readyLabel());
   });
   runBtn.addEventListener('click', run);
-  exportDxfBtn.addEventListener('click', () => lastResult && exportDxf(lastResult, lastParts, currentFine()));
-  exportPdfBtn.addEventListener('click', () => {
+  exportDxfBtn.addEventListener('click', async () => {
+    if (!lastResult || !(await ensurePaid()) || !lastResult) return;
+    exportDxf(lastResult, lastParts, currentFine());
+  });
+  exportPdfBtn.addEventListener('click', async () => {
     if (!lastResult) return;
+    // Open the report window inside the click, before any await (popup blockers).
+    const win = resultPaid ? null : window.open('', '_blank');
+    if (!(await ensurePaid()) || !lastResult) {
+      win?.close();
+      return;
+    }
     const partSvg = makePartSvg(lastResult);
-    openReport({
-      result: lastResult,
-      parts: lastParts,
-      cut: cutMetrics(lastPlans, currentConfig()),
-      fileName: importedName,
-      sheetCost: num('sheetCost'),
-      ...(partSvg ? { partSvg } : {}),
-    });
+    openReport(
+      {
+        result: lastResult,
+        parts: lastParts,
+        cut: cutMetrics(lastPlans, currentConfig()),
+        fileName: importedName,
+        sheetCost: num('sheetCost'),
+        ...(partSvg ? { partSvg } : {}),
+      },
+      win,
+    );
   });
   el('showPath').addEventListener('change', () => {
     if (lastResult) render(lastResult);
@@ -1030,6 +1120,7 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
         parts: r.placements.length,
         sheets: r.sheetsUsed,
         util: r.metrics.utilization,
+        paid: resultPaid,
       })
       .then(() => refreshHistory());
   };
@@ -1089,6 +1180,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
     lastParts = parts;
     resultRemnantId = null;
     resultFit = false;
+    resultPaid = h.paid !== false;
+    resultInstances = h.result.placements.length + h.result.unplaced.length;
     runId = h.id;
     render(h.result);
     statusMsg(t('hist.restored', { name: h.name }));
@@ -1189,6 +1282,12 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
   }
   savedWork = null;
 
+  // Which moment is charged (admin setting): each nest, or the download.
+  void api.getConfig().then((cfg) => {
+    chargeOn = cfg.chargeOn === 'export' ? 'export' : 'nest';
+    updateCostLabel();
+  });
+
   // Refresh the balance from the server (kicks stale sessions back to login).
   api
     .me()
@@ -1232,6 +1331,8 @@ export function renderApp(root: HTMLElement, navigate: Nav): () => void {
       remnantId: remnantSel.value,
       resultRemnantId,
       resultFit,
+      resultPaid,
+      resultInstances,
     };
   };
 }

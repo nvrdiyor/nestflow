@@ -614,3 +614,21 @@ describe('public stats', () => {
     expect(s.parts).toBeGreaterThanOrEqual(s.nests);
   });
 });
+
+describe('charge moment setting', () => {
+  it('defaults to charging each nest and can switch to paid downloads', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/config' })).json().chargeOn).toBe('nest');
+    const login = await app.inject({ method: 'POST', url: '/api/admin/login', payload: { username: 'admin', password: 'admin-pass' } });
+    const admin = { authorization: `Bearer ${login.json().token}` };
+    const bad = await app.inject({ method: 'PUT', url: '/api/admin/settings', headers: admin, payload: { proPrice: 1, vipPrice: 1, proMonthlyCredits: 1, freeNests: 3, salesContact: 'dior_react', chargeOn: 'later' } });
+    expect(bad.statusCode).toBe(400);
+    const cur = (await app.inject({ method: 'GET', url: '/api/admin/settings', headers: admin })).json();
+    const ok = await app.inject({ method: 'PUT', url: '/api/admin/settings', headers: admin, payload: { ...cur, chargeOn: 'export' } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().chargeOn).toBe('export');
+    expect((await app.inject({ method: 'GET', url: '/api/config' })).json().chargeOn).toBe('export');
+    // Other keys keep their values; switching back works.
+    const back = await app.inject({ method: 'PUT', url: '/api/admin/settings', headers: admin, payload: { ...cur, chargeOn: 'nest' } });
+    expect(back.json()).toMatchObject({ ...cur, chargeOn: 'nest' });
+  });
+});

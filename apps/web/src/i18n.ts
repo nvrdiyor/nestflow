@@ -394,6 +394,12 @@ const en: Dict = {
   'roi.payback': 'The PRO plan pays for itself in {d} days',
   'roi.paybackNone': 'Raise the fill to see the saving',
   'roi.note': 'Check the real fill on your own files during the free {n}-day trial.',
+  'plan.nestFree': 'free',
+  'app.payToExport': 'nesting is free — the DXF / PDF download is charged',
+  'app.exportChargeFail': 'Could not charge for the download — check your connection and try again.',
+  'admin.chargeOn': 'When to charge credits',
+  'admin.chargeNest': 'For every nest (default)',
+  'admin.chargeExport': 'Nesting free, pay to download',
 };
 
 const uz: Dict = {
@@ -764,6 +770,12 @@ const uz: Dict = {
   'roi.payback': 'PRO tarifi {d} kunda o‘zini oqlaydi',
   'roi.paybackNone': 'Tejashni ko‘rish uchun to‘lishni oshiring',
   'roi.note': 'Haqiqiy to‘lishni {n} kunlik bepul sinov davrida o‘z fayllaringizda tekshiring.',
+  'plan.nestFree': 'bepul',
+  'app.payToExport': 'joylashtirish bepul — DXF / PDF yuklab olish pullik',
+  'app.exportChargeFail': 'Yuklab olish uchun kredit yechilmadi — internetni tekshirib, qayta urinib ko‘ring.',
+  'admin.chargeOn': 'Kredit qachon yechiladi',
+  'admin.chargeNest': 'Har bir joylashtirishda (odatiy)',
+  'admin.chargeExport': 'Joylashtirish bepul, yuklab olish pullik',
 };
 
 const ru: Dict = {
@@ -1134,6 +1146,12 @@ const ru: Dict = {
   'roi.payback': 'Тариф PRO окупается за {d} дн.',
   'roi.paybackNone': 'Увеличьте заполнение, чтобы увидеть экономию',
   'roi.note': 'Проверьте реальное заполнение на своих файлах за {n} дн. бесплатного теста.',
+  'plan.nestFree': 'бесплатно',
+  'app.payToExport': 'раскладка бесплатна — платно скачивание DXF / PDF',
+  'app.exportChargeFail': 'Не удалось списать кредиты за скачивание — проверьте соединение и попробуйте снова.',
+  'admin.chargeOn': 'Когда списывать кредиты',
+  'admin.chargeNest': 'За каждую раскладку (по умолчанию)',
+  'admin.chargeExport': 'Раскладка бесплатно, скачивание платно',
 };
 
 const DICTS: Record<Lang, Dict> = { en, uz, ru };

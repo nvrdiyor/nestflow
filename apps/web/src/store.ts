@@ -19,6 +19,8 @@ export interface HistoryEntry {
   parts: number;
   sheets: number;
   util: number;
+  /** Charged already (false only in "pay to download" mode before the first download). */
+  paid?: boolean;
 }
 
 export interface RemnantEntry {
